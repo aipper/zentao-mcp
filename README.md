@@ -89,3 +89,4 @@ npm run release:npm -- --release v0.1.0
 注意：
 - 若 `package.json` 为 `private: true`，发布前请改成 `false` 并确认包名可用。
 - 可加 `--require-tag` 要求 HEAD 上有匹配版本的 tag。
+- 若发布时报 `403`，通常是包名归属问题；建议改为 scoped 包名（如 `@yourname/zentao-mcp-server`）。

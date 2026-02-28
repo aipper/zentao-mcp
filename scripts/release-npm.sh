@@ -205,6 +205,46 @@ if (!cmd || !Number.isFinite(seconds) || seconds <= 0) {
   console.error("error: invalid timeout config");
   process.exit(2);
 }
+
+check_publish_ownership() {
+  local npm_user="$1"
+  local package_name="$2"
+
+  local view_out=""
+  local view_code=0
+  set +e
+  view_out="$(npm view "$package_name" name 2>&1)"
+  view_code=$?
+  set -e
+
+  if [[ "$view_code" != "0" ]]; then
+    if echo "$view_out" | grep -Eqi "(E404|404|not found|not in this registry)"; then
+      log "publish ownership precheck: package not found on registry ($package_name), treated as first publish"
+      return 0
+    fi
+    warn "publish ownership precheck skipped: cannot query package metadata"
+    return 0
+  fi
+
+  local owners_out=""
+  local owners_code=0
+  set +e
+  owners_out="$(npm owner ls "$package_name" 2>&1)"
+  owners_code=$?
+  set -e
+
+  if [[ "$owners_code" != "0" ]]; then
+    warn "publish ownership precheck skipped: cannot query package owners"
+    return 0
+  fi
+
+  if echo "$owners_out" | grep -Eiq "^${npm_user}[[:space:]]"; then
+    log "publish ownership precheck: ok ($npm_user owns $package_name)"
+    return 0
+  fi
+
+  die "npm user '$npm_user' is not an owner of '$package_name' (likely 403). Use a scoped name like '@$npm_user/zentao-mcp-server' or ask current owner to add you."
+}
 const child = spawn(cmd, args, { stdio: "inherit" });
 const timer = setTimeout(() => {
   console.error(`error: timeout after ${seconds}s: ${cmd} ${args.join(" ")}`.trim());
@@ -366,6 +406,21 @@ else
       die "npm whoami failed (or timed out); run npm login and retry"
     fi
     warn "npm whoami failed (or timed out; ok for dry-run)"
+  fi
+fi
+
+if [[ "$PUBLISH" == "1" ]]; then
+  if [[ "$SKIP_WHOAMI" == "1" ]]; then
+    warn "publish ownership precheck skipped because --skip-whoami is enabled"
+  else
+    set +e
+    npm_user="$(npm whoami 2>/dev/null | tr -d '\r\n')"
+    npm_user_code=$?
+    set -e
+    if [[ "$npm_user_code" != "0" || -z "${npm_user:-}" ]]; then
+      die "failed to resolve npm username for ownership precheck"
+    fi
+    check_publish_ownership "$npm_user" "$pkg_name"
   fi
 fi
 

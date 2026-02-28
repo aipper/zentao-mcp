@@ -1,5 +1,5 @@
 {
-  "name": "zentao-mcp-server",
+  "name": "@aipper/zentao-mcp-server",
   "version": "0.1.3",
   "private": false,
   "type": "module",
