@@ -189,23 +189,6 @@ backup_package_for_restore() {
   release_restore_on_exit=1
 }
 
-run_cmd_with_timeout() {
-  local seconds="$1"
-  shift
-  local cmd="$1"
-  shift
-  local -a cmd_args=("$@")
-  NPM_TIMEOUT_SECONDS="$seconds" NPM_TIMEOUT_CMD="$cmd" NPM_TIMEOUT_ARGS="$(printf '%s\n' "${cmd_args[@]-}" | node -e "const fs=require('fs'); const lines=fs.readFileSync(0,'utf8').split(/\r?\n/).filter(Boolean); process.stdout.write(JSON.stringify(lines));")" \
-    node - <<'NODE'
-const { spawn } = require("node:child_process");
-const seconds = Number.parseInt(process.env.NPM_TIMEOUT_SECONDS || "0", 10);
-const cmd = process.env.NPM_TIMEOUT_CMD;
-const args = JSON.parse(process.env.NPM_TIMEOUT_ARGS || "[]");
-if (!cmd || !Number.isFinite(seconds) || seconds <= 0) {
-  console.error("error: invalid timeout config");
-  process.exit(2);
-}
-
 check_publish_ownership() {
   local npm_user="$1"
   local package_name="$2"
@@ -244,19 +227,6 @@ check_publish_ownership() {
   fi
 
   die "npm user '$npm_user' is not an owner of '$package_name' (likely 403). Use a scoped name like '@$npm_user/zentao-mcp-server' or ask current owner to add you."
-}
-const child = spawn(cmd, args, { stdio: "inherit" });
-const timer = setTimeout(() => {
-  console.error(`error: timeout after ${seconds}s: ${cmd} ${args.join(" ")}`.trim());
-  child.kill("SIGTERM");
-  setTimeout(() => child.kill("SIGKILL"), 1000);
-}, seconds * 1000);
-child.on("exit", (code, signal) => {
-  clearTimeout(timer);
-  if (signal) process.exit(1);
-  process.exit(typeof code === "number" ? code : 1);
-});
-NODE
 }
 
 read_pkg
