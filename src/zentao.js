@@ -31,7 +31,7 @@ function createAbortSignal(timeoutMs) {
 }
 
 export function createZenTaoClient(config) {
-  const { baseUrl, apiPrefix, tokenPath, tokenTtlMs, timeoutMs, auth } = config;
+  const { baseUrl, apiPrefix, tokenPath, tokenTtlMs, timeoutMs, defaultProductId, auth } = config;
 
   let cachedToken = "";
   let cachedAt = 0;
@@ -174,6 +174,30 @@ export function createZenTaoClient(config) {
     return String(value || "").trim().toLowerCase();
   }
 
+  function normalizePositiveInt(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
+  }
+
+  function buildProductScopedBugsPath({ productId, path }) {
+    const pid = normalizePositiveInt(productId);
+    if (!pid) return path || "/bugs";
+
+    const basePath = path || "/bugs";
+    if (basePath.includes("{productId}")) {
+      return basePath.replaceAll("{productId}", String(pid));
+    }
+    if (basePath === "/bugs") {
+      return `/products/${pid}/bugs`;
+    }
+    return basePath;
+  }
+
+  function isNeedProductIdError(err) {
+    const merged = `${String(err?.message || "")} ${JSON.stringify(err?.data || "")}`.toLowerCase();
+    return merged.includes("need product id");
+  }
+
   function getBugAssignee(bug) {
     return (
       bug?.assignedTo ||
@@ -275,19 +299,45 @@ export function createZenTaoClient(config) {
     return Array.from(images);
   }
 
-  async function getMyBugs({ status, keyword, limit = 20, page = 1, path = "/bugs", assignedTo } = {}) {
+  async function getMyBugs({
+    status,
+    keyword,
+    limit = 20,
+    page = 1,
+    productId,
+    path = "/bugs",
+    assignedTo,
+  } = {}) {
     const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
     const safePage = Math.max(1, Number(page) || 1);
     const assignee = normalizeString(assignedTo) || normalizeString(auth.account);
+    const effectiveProductId = normalizePositiveInt(productId) || normalizePositiveInt(defaultProductId);
+    const primaryPath = buildProductScopedBugsPath({ productId: effectiveProductId, path });
 
     const query = {
       limit: safeLimit,
       page: safePage,
       assignedTo: assignee || undefined,
       status: status || undefined,
+      product: effectiveProductId || undefined,
     };
-    const resp = await call({ path, method: "GET", query });
-    const bugs = parseBugsFromResponse(resp.data);
+    let resp;
+    try {
+      resp = await call({ path: primaryPath, method: "GET", query });
+    } catch (err) {
+      const fallbackPath = effectiveProductId ? `/products/${effectiveProductId}/bugs` : null;
+      if (
+        fallbackPath &&
+        primaryPath !== fallbackPath &&
+        isNeedProductIdError(err)
+      ) {
+        resp = await call({ path: fallbackPath, method: "GET", query: { limit: safeLimit, page: safePage } });
+      } else {
+        throw err;
+      }
+    }
+
+    const bugs = parseBugsFromResponse(resp?.data);
     const filtered = bugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
 
     return {
@@ -295,9 +345,10 @@ export function createZenTaoClient(config) {
       matched: filtered.length,
       page: safePage,
       limit: safeLimit,
+      productId: effectiveProductId,
       assignedTo: assignee,
       bugs: filtered,
-      raw: { status: resp.status },
+      raw: { status: resp?.status, path: primaryPath },
     };
   }
 
@@ -421,6 +472,7 @@ export function createZenTaoClient(config) {
     keyword = "",
     limit = 50,
     page = 1,
+    productId,
     maxItems = 50,
     assignedTo = "",
     resolution = "fixed",
@@ -435,6 +487,7 @@ export function createZenTaoClient(config) {
       keyword,
       limit,
       page,
+      productId,
       path: listPath,
       assignedTo,
     });

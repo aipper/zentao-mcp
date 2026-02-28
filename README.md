@@ -16,6 +16,7 @@
 - `ZENTAO_BASE_URL`
 - `ZENTAO_ACCOUNT`
 - `ZENTAO_PASSWORD`
+- （可选）`ZENTAO_PRODUCT_ID`：你的禅道实例若报 `Need product id` 时设置
 
 > 注意：不同禅道版本/部署方式的 token 端点与返回结构可能不同；可通过 `ZENTAO_TOKEN_PATH`/`ZENTAO_API_PREFIX` 调整。
 >
@@ -86,6 +87,7 @@ npm run smoke
 ## 常见错误（`-32000`）
 `-32000` 通常是客户端侧“通用 MCP 调用失败”映射码，优先检查：
 - `env` 是否完整传入（尤其是 `ZENTAO_BASE_URL`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`）。
+- 若报 `Need product id`，请设置 `ZENTAO_PRODUCT_ID`，或在 `get_my_bugs` 传 `productId`。
 - `ZENTAO_API_PREFIX`/`ZENTAO_TOKEN_PATH` 是否和你的禅道实例一致。
 - MCP 客户端是否真的在执行 `npx -y @aipper/zentao-mcp-server`（而不是旧的本地命令）。
 - 客户端日志中是否有启动报错（如找不到命令、401、超时）。
@@ -94,16 +96,17 @@ npm run smoke
 - `get_token`：获取/刷新 token（默认不回显完整 token）
 - `call`：调用任意相对 API 路径（自动带 Token 头）
 - `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调）
-- `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`，默认路径 `/bugs`）
+- `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`，默认路径 `/bugs`）
 - `get_bug_detail`：按 `id` 获取 bug 详情（默认路径模板 `/bugs/{id}`，返回详情与图片链接）
 - `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`）
-- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`）
+- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`）
 - `close_bug`：按 `id` 关闭 bug
 - `verify_bug`：验证结果处理（`pass`=关闭，`fail`=激活）
 
 示例参数：
 - `resolve_bug`：`{"id":123,"resolution":"fixed","comment":"已修复并自测"}`
 - `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"批量修复"}`
+- `get_my_bugs`（按产品）：`{"status":"active","productId":1,"limit":50}`
 - `close_bug`：`{"id":123,"comment":"验证通过，关闭"}`
 - `verify_bug`：`{"id":123,"result":"pass","comment":"验证通过"}`
 

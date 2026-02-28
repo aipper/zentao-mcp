@@ -1,7 +1,10 @@
-export function toMcpTextResult(text) {
+export function toMcpTextResult(text, options = {}) {
+  const { isError = false } = options;
   return {
     content: [{ type: "text", text }],
     structuredContent: { output: text },
+    output: text,
+    ...(isError ? { isError: true } : {}),
   };
 }
 
@@ -49,6 +52,7 @@ export const TOOLS = [
         keyword: { type: "string", description: "Optional keyword in title/steps/severity/pri" },
         limit: { type: "number", minimum: 1, maximum: 200, description: "Default 20, max 200" },
         page: { type: "number", minimum: 1, description: "Default 1" },
+        productId: { type: "number", minimum: 1, description: "Optional product id (for instances requiring product scope)" },
         path: { type: "string", description: "Optional bugs endpoint override, default /bugs" },
         assignedTo: { type: "string", description: "Optional assignee override, default current account" },
       },
@@ -93,6 +97,7 @@ export const TOOLS = [
         keyword: { type: "string", description: "Optional keyword filter before resolve" },
         limit: { type: "number", minimum: 1, maximum: 200, description: "List page size, default 50" },
         page: { type: "number", minimum: 1, description: "Default 1" },
+        productId: { type: "number", minimum: 1, description: "Optional product id (for instances requiring product scope)" },
         maxItems: { type: "number", minimum: 1, maximum: 500, description: "Max resolve count, default 50" },
         assignedTo: { type: "string", description: "Optional assignee override" },
         resolution: { type: "string", description: "Default fixed" },
@@ -152,6 +157,9 @@ export function assertToolArgs(name, args) {
     if (args.path !== undefined && typeof args.path !== "string") {
       throw new Error("get_my_bugs.path must be a string");
     }
+    if (args.productId !== undefined && (!Number.isFinite(args.productId) || args.productId < 1)) {
+      throw new Error("get_my_bugs.productId must be a number >= 1");
+    }
   }
   if (name === "get_bug_detail") {
     if (!Number.isFinite(args.id) || Number(args.id) < 1) {
@@ -178,6 +186,9 @@ export function assertToolArgs(name, args) {
     }
     if (args.maxItems !== undefined && (!Number.isFinite(args.maxItems) || args.maxItems < 1 || args.maxItems > 500)) {
       throw new Error("batch_resolve_my_bugs.maxItems must be a number between 1 and 500");
+    }
+    if (args.productId !== undefined && (!Number.isFinite(args.productId) || args.productId < 1)) {
+      throw new Error("batch_resolve_my_bugs.productId must be a number >= 1");
     }
     if (args.listPath !== undefined && typeof args.listPath !== "string") {
       throw new Error("batch_resolve_my_bugs.listPath must be a string");
