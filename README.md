@@ -18,12 +18,20 @@
 - `ZENTAO_PASSWORD`
 
 > 注意：不同禅道版本/部署方式的 token 端点与返回结构可能不同；可通过 `ZENTAO_TOKEN_PATH`/`ZENTAO_API_PREFIX` 调整。
+>
+> 默认情况下不需要配置 `ZENTAO_API_PREFIX`（默认值是 `/api.php/v1`）。
 
 ## 安装与运行
 ```bash
 npm i
 cp .env.example .env
 npm start
+```
+
+## npm 安装后的运行
+发布到 npm 后，推荐用 `npx` 启动（适合 MCP 客户端配置）：
+```bash
+npx -y @aipper/zentao-mcp-server
 ```
 
 ## 验证（不依赖 MCP 客户端）
@@ -38,7 +46,24 @@ npm run smoke
 - 输出 `GET /projects status: 200`（或你的禅道实际返回码）
 
 ## Claude Desktop / Cursor 示例（stdio）
-把启动命令指向 `node src/index.js`（或 `npm start`）。
+优先使用 `npx`（npm 发布版）：
+```json
+{
+  "mcpServers": {
+    "zentao": {
+      "command": "npx",
+      "args": ["-y", "@aipper/zentao-mcp-server"],
+      "env": {
+        "ZENTAO_BASE_URL": "https://zentao.example.com",
+        "ZENTAO_ACCOUNT": "your_account",
+        "ZENTAO_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+本地源码调试可继续用 `node src/index.js`：
 
 示例（Claude Desktop 的 `mcpServers` 风格，按你的客户端实际字段为准）：
 ```json
@@ -50,7 +75,6 @@ npm run smoke
       "cwd": "/ABS/PATH/TO/zentao",
       "env": {
         "ZENTAO_BASE_URL": "https://zentao.example.com",
-        "ZENTAO_API_PREFIX": "/api.php/v1",
         "ZENTAO_ACCOUNT": "your_account",
         "ZENTAO_PASSWORD": "your_password"
       }
@@ -58,6 +82,13 @@ npm run smoke
   }
 }
 ```
+
+## 常见错误（`-32000`）
+`-32000` 通常是客户端侧“通用 MCP 调用失败”映射码，优先检查：
+- `env` 是否完整传入（尤其是 `ZENTAO_BASE_URL`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`）。
+- `ZENTAO_API_PREFIX`/`ZENTAO_TOKEN_PATH` 是否和你的禅道实例一致。
+- MCP 客户端是否真的在执行 `npx -y @aipper/zentao-mcp-server`（而不是旧的本地命令）。
+- 客户端日志中是否有启动报错（如找不到命令、401、超时）。
 
 ## 已实现工具
 - `get_token`：获取/刷新 token（默认不回显完整 token）
