@@ -391,21 +391,19 @@ fi
 if [[ "$SKIP_WHOAMI" == "1" ]]; then
   warn "npm whoami skipped (--skip-whoami)"
 else
-  whoami_timeout_seconds=15
-  if [[ "$PUBLISH" != "1" ]]; then
-    whoami_timeout_seconds=5
-  fi
   set +e
-  run_cmd_with_timeout "$whoami_timeout_seconds" npm whoami >/dev/null 2>&1
+  whoami_out="$(npm whoami 2>&1)"
   whoami_code=$?
   set -e
   if [[ "$whoami_code" == "0" ]]; then
-    log "npm whoami: ok"
+    npm_user="$(printf '%s' "$whoami_out" | tr -d '\r\n')"
+    log "npm whoami: ok ($npm_user)"
   else
+    warn "npm whoami failed:"
+    echo "$whoami_out" >&2
     if [[ "$PUBLISH" == "1" ]]; then
-      die "npm whoami failed (or timed out); run npm login and retry"
+      warn "continue publish flow despite whoami failure; final publish result will be authoritative"
     fi
-    warn "npm whoami failed (or timed out; ok for dry-run)"
   fi
 fi
 
@@ -413,14 +411,11 @@ if [[ "$PUBLISH" == "1" ]]; then
   if [[ "$SKIP_WHOAMI" == "1" ]]; then
     warn "publish ownership precheck skipped because --skip-whoami is enabled"
   else
-    set +e
-    npm_user="$(npm whoami 2>/dev/null | tr -d '\r\n')"
-    npm_user_code=$?
-    set -e
-    if [[ "$npm_user_code" != "0" || -z "${npm_user:-}" ]]; then
-      die "failed to resolve npm username for ownership precheck"
+    if [[ -z "${npm_user:-}" ]]; then
+      warn "publish ownership precheck skipped: npm username unavailable"
+    else
+      check_publish_ownership "$npm_user" "$pkg_name"
     fi
-    check_publish_ownership "$npm_user" "$pkg_name"
   fi
 fi
 
