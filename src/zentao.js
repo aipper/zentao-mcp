@@ -154,6 +154,326 @@ export function createZenTaoClient(config) {
     return { total: list.length, matched: filtered.length, projects: filtered };
   }
 
+  function parseBugsFromResponse(data) {
+    if (Array.isArray(data?.bugs)) return data.bugs;
+    if (Array.isArray(data?.data?.bugs)) return data.data.bugs;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data)) return data;
+    return [];
+  }
+
+  function parseBugDetailFromResponse(data) {
+    if (data?.bug && typeof data.bug === "object") return data.bug;
+    if (data?.data?.bug && typeof data.data.bug === "object") return data.data.bug;
+    if (data?.data && typeof data.data === "object" && !Array.isArray(data.data)) return data.data;
+    if (data && typeof data === "object" && !Array.isArray(data)) return data;
+    return null;
+  }
+
+  function normalizeString(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function getBugAssignee(bug) {
+    return (
+      bug?.assignedTo ||
+      bug?.assignedto ||
+      bug?.assigned_to ||
+      bug?.assignedUser ||
+      bug?.owner ||
+      ""
+    );
+  }
+
+  function matchesBugFilters(bug, { status, keyword, assignee }) {
+    const normalizedStatus = normalizeString(status);
+    const normalizedKeyword = normalizeString(keyword);
+    const normalizedAssignee = normalizeString(assignee);
+
+    if (normalizedStatus) {
+      const bugStatus = normalizeString(bug?.status);
+      if (bugStatus !== normalizedStatus) return false;
+    }
+
+    if (normalizedAssignee) {
+      const bugAssignee = normalizeString(getBugAssignee(bug));
+      if (bugAssignee !== normalizedAssignee) return false;
+    }
+
+    if (normalizedKeyword) {
+      const searchableText = [
+        bug?.title,
+        bug?.severity,
+        bug?.pri,
+        bug?.steps,
+        bug?.status,
+        getBugAssignee(bug),
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase())
+        .join(" ");
+      if (!searchableText.includes(normalizedKeyword)) return false;
+    }
+
+    return true;
+  }
+
+  function buildBugDetailPath({ id, path }) {
+    const normalizedId = Number(id);
+    const basePath = path || "/bugs/{id}";
+    if (basePath.includes("{id}")) {
+      return basePath.replaceAll("{id}", String(normalizedId));
+    }
+    const trimmed = basePath.replace(/\/+$/, "");
+    return `${trimmed}/${normalizedId}`;
+  }
+
+  function buildBugResolvePath({ id, path }) {
+    return buildBugTransitionPath({ id, path, action: "resolve" });
+  }
+
+  function buildBugTransitionPath({ id, path, action }) {
+    const normalizedId = Number(id);
+    const safeAction = String(action || "").trim();
+    if (!safeAction) throw new Error("buildBugTransitionPath requires action");
+    const basePath = path || `/bugs/{id}/${safeAction}`;
+    if (basePath.includes("{id}")) {
+      return basePath.replaceAll("{id}", String(normalizedId));
+    }
+    const trimmed = basePath.replace(/\/+$/, "");
+    return `${trimmed}/${normalizedId}/${safeAction}`;
+  }
+
+  function getBugId(bug) {
+    const id = Number(
+      bug?.id ??
+      bug?.bugId ??
+      bug?.bugID ??
+      bug?.bug_id ??
+      bug?.bug?.id
+    );
+    return Number.isFinite(id) && id > 0 ? id : null;
+  }
+
+  function extractImageUrlsFromBug(bug) {
+    const images = new Set();
+    const addMatches = (value) => {
+      if (!value) return;
+      const text = String(value);
+      const srcRegex = /<img[^>]+src=["']([^"']+)["']/gi;
+      for (const match of text.matchAll(srcRegex)) {
+        if (match[1]) images.add(match[1]);
+      }
+      const urlRegex = /https?:\/\/[^\s"'<>]+\.(png|jpe?g|gif|webp|bmp|svg)/gi;
+      for (const match of text.matchAll(urlRegex)) {
+        if (match[0]) images.add(match[0]);
+      }
+    };
+    addMatches(bug?.steps);
+    addMatches(bug?.stepsHtml);
+    addMatches(bug?.openedBuild);
+    return Array.from(images);
+  }
+
+  async function getMyBugs({ status, keyword, limit = 20, page = 1, path = "/bugs", assignedTo } = {}) {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
+    const safePage = Math.max(1, Number(page) || 1);
+    const assignee = normalizeString(assignedTo) || normalizeString(auth.account);
+
+    const query = {
+      limit: safeLimit,
+      page: safePage,
+      assignedTo: assignee || undefined,
+      status: status || undefined,
+    };
+    const resp = await call({ path, method: "GET", query });
+    const bugs = parseBugsFromResponse(resp.data);
+    const filtered = bugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
+
+    return {
+      total: bugs.length,
+      matched: filtered.length,
+      page: safePage,
+      limit: safeLimit,
+      assignedTo: assignee,
+      bugs: filtered,
+      raw: { status: resp.status },
+    };
+  }
+
+  async function getBugDetail({ id, path = "/bugs/{id}" } = {}) {
+    const bugId = Number(id);
+    if (!Number.isFinite(bugId) || bugId < 1) {
+      throw new Error("getBugDetail requires a valid bug id");
+    }
+
+    const detailPath = buildBugDetailPath({ id: bugId, path });
+    const resp = await call({ path: detailPath, method: "GET" });
+    const bug = parseBugDetailFromResponse(resp.data);
+    if (!bug) {
+      return {
+        id: bugId,
+        found: false,
+        images: [],
+        raw: { status: resp.status, data: resp.data },
+      };
+    }
+
+    return {
+      id: bugId,
+      found: true,
+      bug,
+      images: extractImageUrlsFromBug(bug),
+      raw: { status: resp.status },
+    };
+  }
+
+  async function resolveBug({ id, resolution = "fixed", comment = "", path = "/bugs/{id}/resolve" } = {}) {
+    const bugId = Number(id);
+    if (!Number.isFinite(bugId) || bugId < 1) {
+      throw new Error("resolveBug requires a valid bug id");
+    }
+
+    const resolvePath = buildBugResolvePath({ id: bugId, path });
+    const body = { resolution: String(resolution || "fixed") };
+    if (comment) body.comment = String(comment);
+
+    const resp = await call({ path: resolvePath, method: "POST", body });
+    return {
+      id: bugId,
+      resolved: true,
+      resolution: body.resolution,
+      raw: { status: resp.status, data: resp.data },
+    };
+  }
+
+  async function closeBug({ id, comment = "", path = "/bugs/{id}/close" } = {}) {
+    const bugId = Number(id);
+    if (!Number.isFinite(bugId) || bugId < 1) {
+      throw new Error("closeBug requires a valid bug id");
+    }
+
+    const closePath = buildBugTransitionPath({ id: bugId, path, action: "close" });
+    const body = {};
+    if (comment) body.comment = String(comment);
+
+    const resp = await call({ path: closePath, method: "POST", body });
+    return {
+      id: bugId,
+      closed: true,
+      raw: { status: resp.status, data: resp.data },
+    };
+  }
+
+  async function activateBug({ id, comment = "", path = "/bugs/{id}/activate" } = {}) {
+    const bugId = Number(id);
+    if (!Number.isFinite(bugId) || bugId < 1) {
+      throw new Error("activateBug requires a valid bug id");
+    }
+
+    const activatePath = buildBugTransitionPath({ id: bugId, path, action: "activate" });
+    const body = {};
+    if (comment) body.comment = String(comment);
+
+    const resp = await call({ path: activatePath, method: "POST", body });
+    return {
+      id: bugId,
+      activated: true,
+      raw: { status: resp.status, data: resp.data },
+    };
+  }
+
+  async function verifyBug({
+    id,
+    result = "pass",
+    comment = "",
+    closePath = "/bugs/{id}/close",
+    activatePath = "/bugs/{id}/activate",
+  } = {}) {
+    const normalizedResult = normalizeString(result || "pass");
+    if (normalizedResult !== "pass" && normalizedResult !== "fail") {
+      throw new Error("verifyBug.result must be pass or fail");
+    }
+
+    if (normalizedResult === "pass") {
+      const closeResult = await closeBug({ id, comment, path: closePath });
+      return {
+        id: Number(id),
+        verified: true,
+        result: "pass",
+        action: "close",
+        raw: closeResult.raw,
+      };
+    }
+
+    const activateResult = await activateBug({ id, comment, path: activatePath });
+    return {
+      id: Number(id),
+      verified: true,
+      result: "fail",
+      action: "activate",
+      raw: activateResult.raw,
+    };
+  }
+
+  async function batchResolveMyBugs({
+    status = "active",
+    keyword = "",
+    limit = 50,
+    page = 1,
+    maxItems = 50,
+    assignedTo = "",
+    resolution = "fixed",
+    comment = "",
+    listPath = "/bugs",
+    resolvePath = "/bugs/{id}/resolve",
+    stopOnError = false,
+  } = {}) {
+    const safeMaxItems = Math.max(1, Math.min(Number(maxItems) || 50, 500));
+    const listResult = await getMyBugs({
+      status,
+      keyword,
+      limit,
+      page,
+      path: listPath,
+      assignedTo,
+    });
+
+    const candidates = (listResult.bugs || []).slice(0, safeMaxItems);
+    const success = [];
+    const failed = [];
+
+    for (const bug of candidates) {
+      const bugId = getBugId(bug);
+      if (!bugId) {
+        failed.push({ id: null, error: "Missing bug id in list item" });
+        if (stopOnError) break;
+        continue;
+      }
+      try {
+        const result = await resolveBug({
+          id: bugId,
+          resolution,
+          comment,
+          path: resolvePath,
+        });
+        success.push({ id: bugId, status: result.raw.status });
+      } catch (err) {
+        failed.push({ id: bugId, error: String(err?.message || err) });
+        if (stopOnError) break;
+      }
+    }
+
+    return {
+      requested: listResult.matched,
+      attempted: candidates.length,
+      resolved: success.length,
+      failed: failed.length,
+      success,
+      errors: failed,
+    };
+  }
+
   // 轻量重试：禅道偶发 502/网关问题时可用；默认不用，保留扩展点
   async function callWithRetry(args, { retries = 0, backoffMs = 200 } = {}) {
     let lastErr;
@@ -169,5 +489,16 @@ export function createZenTaoClient(config) {
     throw lastErr;
   }
 
-  return { getToken, call, callWithRetry, listMyProjects };
+  return {
+    getToken,
+    call,
+    callWithRetry,
+    listMyProjects,
+    getMyBugs,
+    getBugDetail,
+    resolveBug,
+    closeBug,
+    verifyBug,
+    batchResolveMyBugs,
+  };
 }

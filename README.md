@@ -94,6 +94,18 @@ npm run smoke
 - `get_token`：获取/刷新 token（默认不回显完整 token）
 - `call`：调用任意相对 API 路径（自动带 Token 头）
 - `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调）
+- `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`，默认路径 `/bugs`）
+- `get_bug_detail`：按 `id` 获取 bug 详情（默认路径模板 `/bugs/{id}`，返回详情与图片链接）
+- `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`）
+- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`）
+- `close_bug`：按 `id` 关闭 bug
+- `verify_bug`：验证结果处理（`pass`=关闭，`fail`=激活）
+
+示例参数：
+- `resolve_bug`：`{"id":123,"resolution":"fixed","comment":"已修复并自测"}`
+- `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"批量修复"}`
+- `close_bug`：`{"id":123,"comment":"验证通过，关闭"}`
+- `verify_bug`：`{"id":123,"result":"pass","comment":"验证通过"}`
 
 ## 安全建议
 - 使用最小权限账号（仅需要的项目权限），避免使用管理员账号。
