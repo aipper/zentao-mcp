@@ -1,0 +1,18 @@
+{
+  "name": "zentao-mcp-server",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "A minimal MCP server for ZenTao (token + generic REST call + a few helper tools).",
+  "license": "UNLICENSED",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "lint": "node -c src/index.js && node -c src/zentao.js && node -c src/tools.js && node -c scripts/smoke.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "release:npm": "bash scripts/release-npm.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest"
+  }
+}
