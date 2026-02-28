@@ -99,16 +99,21 @@ npm run smoke
 - `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`，默认路径 `/bugs`）
 - `get_bug_detail`：按 `id` 获取 bug 详情（默认路径模板 `/bugs/{id}`，返回详情与图片链接）
 - `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`）
+- `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`，支持 `solution` 解决说明）
 - `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`）
 - `close_bug`：按 `id` 关闭 bug
 - `verify_bug`：验证结果处理（`pass`=关闭，`fail`=激活）
+- `comment_bug`：按 `id` 添加备注（默认路径 `/bugs/{id}/comment`）
 
 示例参数：
 - `resolve_bug`：`{"id":123,"resolution":"fixed","comment":"已修复并自测"}`
+- `resolve_bug`（建议）：`{"id":123,"resolution":"fixed","solution":"修复空指针并补充参数校验"}`
 - `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"批量修复"}`
+- `batch_resolve_my_bugs`（建议）：`{"status":"active","maxItems":20,"solution":"统一修复分页参数为空导致的报错"}`
 - `get_my_bugs`（按产品）：`{"status":"active","productId":1,"limit":50}`
 - `close_bug`：`{"id":123,"comment":"验证通过，关闭"}`
 - `verify_bug`：`{"id":123,"result":"pass","comment":"验证通过"}`
+- `comment_bug`：`{"id":123,"comment":"已复现，正在定位根因"}`
 
 ## 安全建议
 - 使用最小权限账号（仅需要的项目权限），避免使用管理员账号。

@@ -18,6 +18,7 @@ const KNOWN_TOOL_NAMES = new Set([
   "batch_resolve_my_bugs",
   "close_bug",
   "verify_bug",
+  "comment_bug",
 ]);
 
 function normalizeToolName(rawName) {
@@ -134,6 +135,7 @@ async function main() {
         const resp = await zentao.resolveBug({
           id: args.id,
           resolution: args.resolution || "fixed",
+          solution: args.solution || "",
           comment: args.comment || "",
           path: args.path || "/bugs/{id}/resolve",
         });
@@ -150,6 +152,7 @@ async function main() {
           maxItems: args.maxItems,
           assignedTo: args.assignedTo || "",
           resolution: args.resolution || "fixed",
+          solution: args.solution || "",
           comment: args.comment || "",
           listPath: args.listPath || "/bugs",
           resolvePath: args.resolvePath || "/bugs/{id}/resolve",
@@ -174,6 +177,15 @@ async function main() {
           comment: args.comment || "",
           closePath: args.closePath || "/bugs/{id}/close",
           activatePath: args.activatePath || "/bugs/{id}/activate",
+        });
+        return toMcpTextResult(JSON.stringify(resp, null, 2));
+      }
+
+      if (toolName === "comment_bug") {
+        const resp = await zentao.commentBug({
+          id: args.id,
+          comment: args.comment || "",
+          path: args.path || "/bugs/{id}/comment",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }

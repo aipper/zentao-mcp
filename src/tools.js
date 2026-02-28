@@ -80,6 +80,7 @@ export const TOOLS = [
       properties: {
         id: { type: "number", minimum: 1, description: "Bug ID" },
         resolution: { type: "string", description: "Default fixed" },
+        solution: { type: "string", description: "Resolution description (preferred)" },
         comment: { type: "string", description: "Optional resolve comment" },
         path: { type: "string", description: "Optional resolve endpoint template, default /bugs/{id}/resolve" },
       },
@@ -101,6 +102,7 @@ export const TOOLS = [
         maxItems: { type: "number", minimum: 1, maximum: 500, description: "Max resolve count, default 50" },
         assignedTo: { type: "string", description: "Optional assignee override" },
         resolution: { type: "string", description: "Default fixed" },
+        solution: { type: "string", description: "Resolution description (preferred)" },
         comment: { type: "string", description: "Optional resolve comment" },
         listPath: { type: "string", description: "Optional list endpoint, default /bugs" },
         resolvePath: { type: "string", description: "Optional resolve path template, default /bugs/{id}/resolve" },
@@ -136,6 +138,20 @@ export const TOOLS = [
         activatePath: { type: "string", description: "Optional activate endpoint template, default /bugs/{id}/activate" },
       },
       required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "comment_bug",
+    description: "Add comment to one bug by ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", minimum: 1, description: "Bug ID" },
+        comment: { type: "string", description: "Comment content" },
+        path: { type: "string", description: "Optional comment endpoint template, default /bugs/{id}/comment" },
+      },
+      required: ["id", "comment"],
       additionalProperties: false,
     },
   },
@@ -176,6 +192,9 @@ export function assertToolArgs(name, args) {
     if (args.path !== undefined && typeof args.path !== "string") {
       throw new Error("resolve_bug.path must be a string");
     }
+    if (args.solution !== undefined && typeof args.solution !== "string") {
+      throw new Error("resolve_bug.solution must be a string");
+    }
   }
   if (name === "batch_resolve_my_bugs") {
     if (args.limit !== undefined && (!Number.isFinite(args.limit) || args.limit < 1 || args.limit > 200)) {
@@ -195,6 +214,9 @@ export function assertToolArgs(name, args) {
     }
     if (args.resolvePath !== undefined && typeof args.resolvePath !== "string") {
       throw new Error("batch_resolve_my_bugs.resolvePath must be a string");
+    }
+    if (args.solution !== undefined && typeof args.solution !== "string") {
+      throw new Error("batch_resolve_my_bugs.solution must be a string");
     }
   }
   if (name === "close_bug") {
@@ -220,6 +242,17 @@ export function assertToolArgs(name, args) {
     }
     if (args.activatePath !== undefined && typeof args.activatePath !== "string") {
       throw new Error("verify_bug.activatePath must be a string");
+    }
+  }
+  if (name === "comment_bug") {
+    if (!Number.isFinite(args.id) || Number(args.id) < 1) {
+      throw new Error("comment_bug.id must be a number >= 1");
+    }
+    if (typeof args.comment !== "string" || !args.comment.trim()) {
+      throw new Error("comment_bug.comment must be a non-empty string");
+    }
+    if (args.path !== undefined && typeof args.path !== "string") {
+      throw new Error("comment_bug.path must be a string");
     }
   }
 }

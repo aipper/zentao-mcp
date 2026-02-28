@@ -198,6 +198,14 @@ export function createZenTaoClient(config) {
     return merged.includes("need product id");
   }
 
+  function buildResolutionComment({ solution, comment, resolution }) {
+    const normalizedSolution = String(solution || "").trim();
+    if (normalizedSolution) return `解决说明：${normalizedSolution}`;
+    const normalizedComment = String(comment || "").trim();
+    if (normalizedComment) return normalizedComment;
+    return `已处理，resolution=${String(resolution || "fixed")}`;
+  }
+
   function getBugAssignee(bug) {
     return (
       bug?.assignedTo ||
@@ -254,6 +262,16 @@ export function createZenTaoClient(config) {
 
   function buildBugResolvePath({ id, path }) {
     return buildBugTransitionPath({ id, path, action: "resolve" });
+  }
+
+  function buildBugCommentPath({ id, path }) {
+    const normalizedId = Number(id);
+    const basePath = path || "/bugs/{id}/comment";
+    if (basePath.includes("{id}")) {
+      return basePath.replaceAll("{id}", String(normalizedId));
+    }
+    const trimmed = basePath.replace(/\/+$/, "");
+    return `${trimmed}/${normalizedId}/comment`;
   }
 
   function buildBugTransitionPath({ id, path, action }) {
@@ -379,21 +397,33 @@ export function createZenTaoClient(config) {
     };
   }
 
-  async function resolveBug({ id, resolution = "fixed", comment = "", path = "/bugs/{id}/resolve" } = {}) {
+  async function resolveBug({
+    id,
+    resolution = "fixed",
+    solution = "",
+    comment = "",
+    path = "/bugs/{id}/resolve",
+  } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("resolveBug requires a valid bug id");
     }
 
     const resolvePath = buildBugResolvePath({ id: bugId, path });
-    const body = { resolution: String(resolution || "fixed") };
-    if (comment) body.comment = String(comment);
+    const resolvedValue = String(resolution || "fixed");
+    const resolvedComment = buildResolutionComment({ solution, comment, resolution: resolvedValue });
+    const body = {
+      resolution: resolvedValue,
+      comment: resolvedComment,
+    };
 
     const resp = await call({ path: resolvePath, method: "POST", body });
     return {
       id: bugId,
       resolved: true,
-      resolution: body.resolution,
+      resolution: resolvedValue,
+      solution: String(solution || "").trim(),
+      comment: resolvedComment,
       raw: { status: resp.status, data: resp.data },
     };
   }
@@ -467,6 +497,41 @@ export function createZenTaoClient(config) {
     };
   }
 
+  async function commentBug({ id, comment, path = "/bugs/{id}/comment" } = {}) {
+    const bugId = Number(id);
+    if (!Number.isFinite(bugId) || bugId < 1) {
+      throw new Error("commentBug requires a valid bug id");
+    }
+    const text = String(comment || "").trim();
+    if (!text) {
+      throw new Error("commentBug requires non-empty comment");
+    }
+
+    const primaryPath = buildBugCommentPath({ id: bugId, path });
+    const body = { comment: text };
+    try {
+      const resp = await call({ path: primaryPath, method: "POST", body });
+      return {
+        id: bugId,
+        commented: true,
+        comment: text,
+        raw: { status: resp.status, path: primaryPath, data: resp.data },
+      };
+    } catch (err) {
+      const fallbackPath = primaryPath.replace(/\/comment$/, "/comments");
+      if (fallbackPath !== primaryPath && Number(err?.status) === 404) {
+        const resp = await call({ path: fallbackPath, method: "POST", body });
+        return {
+          id: bugId,
+          commented: true,
+          comment: text,
+          raw: { status: resp.status, path: fallbackPath, data: resp.data },
+        };
+      }
+      throw err;
+    }
+  }
+
   async function batchResolveMyBugs({
     status = "active",
     keyword = "",
@@ -476,6 +541,7 @@ export function createZenTaoClient(config) {
     maxItems = 50,
     assignedTo = "",
     resolution = "fixed",
+    solution = "",
     comment = "",
     listPath = "/bugs",
     resolvePath = "/bugs/{id}/resolve",
@@ -507,6 +573,7 @@ export function createZenTaoClient(config) {
         const result = await resolveBug({
           id: bugId,
           resolution,
+          solution,
           comment,
           path: resolvePath,
         });
@@ -552,6 +619,7 @@ export function createZenTaoClient(config) {
     resolveBug,
     closeBug,
     verifyBug,
+    commentBug,
     batchResolveMyBugs,
   };
 }
