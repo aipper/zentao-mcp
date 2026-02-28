@@ -14,7 +14,7 @@ Usage:
 Options:
   --release <tag>        Set package version from tag (vX.Y.Z), then commit + tag
   --bump <level>         Auto bump version: patch | minor | major, then commit + tag
-  --publish              Run npm publish after checks
+  --publish              Run npm publish after checks (defaults to --bump patch)
   --yes                  Skip interactive confirmation
   --require-tag          Require a semver git tag on HEAD matching package version
   --skip-secrets-scan    Skip ripgrep-based secrets scan
@@ -220,6 +220,12 @@ NODE
 }
 
 read_pkg
+
+# Default behavior: publishing without explicit release/bump will auto-bump patch.
+if [[ "$PUBLISH" == "1" && -z "${RELEASE_TAG:-}" && -z "${BUMP_LEVEL:-}" ]]; then
+  BUMP_LEVEL="patch"
+  log "publish requested without version args; defaulting to --bump patch"
+fi
 
 log "repo_root=$repo_root"
 log "package=$pkg_name"

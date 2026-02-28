@@ -79,7 +79,7 @@ npm run release:npm
 # 自动递增版本（patch/minor/major）+ commit + tag（不发布）
 npm run release:npm -- --bump patch
 
-# 发布（会二次确认）
+# 发布（会二次确认；默认自动 patch 递增）
 npm run release:npm -- --publish
 
 # 版本对齐 + commit + tag（不发布）
