@@ -50,6 +50,11 @@ function getConfigFromEnv() {
   const timeoutMs = Number(process.env.ZENTAO_HTTP_TIMEOUT_MS || "30000");
   const exposeToken = String(process.env.ZENTAO_EXPOSE_TOKEN || "false").toLowerCase() === "true";
   const defaultProductId = Number(process.env.ZENTAO_PRODUCT_ID || "0") || null;
+  const myBugsPath = String(process.env.ZENTAO_MY_BUGS_PATH || "").trim();
+  const bugsFallbackPaths = String(process.env.ZENTAO_BUGS_FALLBACK_PATHS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 
   const account = requireEnv("ZENTAO_ACCOUNT");
   const password = requireEnv("ZENTAO_PASSWORD");
@@ -62,6 +67,8 @@ function getConfigFromEnv() {
     timeoutMs,
     exposeToken,
     defaultProductId,
+    myBugsPath,
+    bugsFallbackPaths,
     auth: { account, password },
   };
 }

@@ -17,6 +17,8 @@
 - `ZENTAO_ACCOUNT`
 - `ZENTAO_PASSWORD`
 - （可选）`ZENTAO_PRODUCT_ID`：你的禅道实例若报 `Need product id` 时设置
+- （可选）`ZENTAO_MY_BUGS_PATH`：我的 bug 专用接口路径（如 `/my/bug`）
+- （可选）`ZENTAO_BUGS_FALLBACK_PATHS`：bug 列表回退路径（逗号分隔）
 
 > 注意：不同禅道版本/部署方式的 token 端点与返回结构可能不同；可通过 `ZENTAO_TOKEN_PATH`/`ZENTAO_API_PREFIX` 调整。
 >
@@ -88,6 +90,7 @@ npm run smoke
 `-32000` 通常是客户端侧“通用 MCP 调用失败”映射码，优先检查：
 - `env` 是否完整传入（尤其是 `ZENTAO_BASE_URL`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`）。
 - 若报 `Need product id`，请设置 `ZENTAO_PRODUCT_ID`，或在 `get_my_bugs` 传 `productId`。
+- 若你的 bug 在“项目集/我的视角”而非产品，建议设置 `ZENTAO_MY_BUGS_PATH=/my/bug`（或 `/my/bugs`）。
 - `ZENTAO_API_PREFIX`/`ZENTAO_TOKEN_PATH` 是否和你的禅道实例一致。
 - MCP 客户端是否真的在执行 `npx -y @aipper/zentao-mcp-server`（而不是旧的本地命令）。
 - 客户端日志中是否有启动报错（如找不到命令、401、超时）。
@@ -111,6 +114,7 @@ npm run smoke
 - `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"批量修复"}`
 - `batch_resolve_my_bugs`（建议）：`{"status":"active","maxItems":20,"solution":"统一修复分页参数为空导致的报错"}`
 - `get_my_bugs`（按产品）：`{"status":"active","productId":1,"limit":50}`
+- `get_my_bugs`（项目集/我的）：`{"status":"active","path":"/my/bug","limit":50}`
 - `close_bug`：`{"id":123,"comment":"验证通过，关闭"}`
 - `verify_bug`：`{"id":123,"result":"pass","comment":"验证通过"}`
 - `comment_bug`：`{"id":123,"comment":"已复现，正在定位根因"}`
