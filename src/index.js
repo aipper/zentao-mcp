@@ -50,8 +50,13 @@ function getConfigFromEnv() {
   const timeoutMs = Number(process.env.ZENTAO_HTTP_TIMEOUT_MS || "30000");
   const exposeToken = String(process.env.ZENTAO_EXPOSE_TOKEN || "false").toLowerCase() === "true";
   const defaultProductId = Number(process.env.ZENTAO_PRODUCT_ID || "0") || null;
+  const defaultProjectSetId = Number(process.env.ZENTAO_PROJECT_SET_ID || "0") || null;
   const myBugsPath = String(process.env.ZENTAO_MY_BUGS_PATH || "").trim();
   const bugsFallbackPaths = String(process.env.ZENTAO_BUGS_FALLBACK_PATHS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const projectSetBugsPaths = String(process.env.ZENTAO_PROJECT_SET_BUGS_PATHS || "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -67,8 +72,10 @@ function getConfigFromEnv() {
     timeoutMs,
     exposeToken,
     defaultProductId,
+    defaultProjectSetId,
     myBugsPath,
     bugsFallbackPaths,
+    projectSetBugsPaths,
     auth: { account, password },
   };
 }
@@ -124,6 +131,7 @@ async function main() {
           limit: args.limit,
           page: args.page,
           productId: args.productId,
+          projectSetId: args.projectSetId,
           path: args.path || "/bugs",
           assignedTo: args.assignedTo || "",
         });
@@ -156,6 +164,7 @@ async function main() {
           limit: args.limit,
           page: args.page,
           productId: args.productId,
+          projectSetId: args.projectSetId,
           maxItems: args.maxItems,
           assignedTo: args.assignedTo || "",
           resolution: args.resolution || "fixed",
@@ -206,6 +215,7 @@ async function main() {
         status: err?.status ?? null,
         data: err?.data ?? null,
         hint: "If you see 'Need product id', set env ZENTAO_PRODUCT_ID or pass productId in get_my_bugs.",
+        hint2: "For project-set instances, set ZENTAO_PROJECT_SET_ID or ZENTAO_MY_BUGS_PATH.",
       };
       return toMcpTextResult(JSON.stringify(errorPayload, null, 2), { isError: true });
     }

@@ -53,6 +53,7 @@ export const TOOLS = [
         limit: { type: "number", minimum: 1, maximum: 200, description: "Default 20, max 200" },
         page: { type: "number", minimum: 1, description: "Default 1" },
         productId: { type: "number", minimum: 1, description: "Optional product id (for instances requiring product scope)" },
+        projectSetId: { type: "number", minimum: 1, description: "Optional project-set id (for project-set scope)" },
         path: { type: "string", description: "Optional bugs endpoint override, default /bugs" },
         assignedTo: { type: "string", description: "Optional assignee override, default current account" },
       },
@@ -99,6 +100,7 @@ export const TOOLS = [
         limit: { type: "number", minimum: 1, maximum: 200, description: "List page size, default 50" },
         page: { type: "number", minimum: 1, description: "Default 1" },
         productId: { type: "number", minimum: 1, description: "Optional product id (for instances requiring product scope)" },
+        projectSetId: { type: "number", minimum: 1, description: "Optional project-set id (for project-set scope)" },
         maxItems: { type: "number", minimum: 1, maximum: 500, description: "Max resolve count, default 50" },
         assignedTo: { type: "string", description: "Optional assignee override" },
         resolution: { type: "string", description: "Default fixed" },
@@ -176,6 +178,9 @@ export function assertToolArgs(name, args) {
     if (args.productId !== undefined && (!Number.isFinite(args.productId) || args.productId < 1)) {
       throw new Error("get_my_bugs.productId must be a number >= 1");
     }
+    if (args.projectSetId !== undefined && (!Number.isFinite(args.projectSetId) || args.projectSetId < 1)) {
+      throw new Error("get_my_bugs.projectSetId must be a number >= 1");
+    }
   }
   if (name === "get_bug_detail") {
     if (!Number.isFinite(args.id) || Number(args.id) < 1) {
@@ -208,6 +213,9 @@ export function assertToolArgs(name, args) {
     }
     if (args.productId !== undefined && (!Number.isFinite(args.productId) || args.productId < 1)) {
       throw new Error("batch_resolve_my_bugs.productId must be a number >= 1");
+    }
+    if (args.projectSetId !== undefined && (!Number.isFinite(args.projectSetId) || args.projectSetId < 1)) {
+      throw new Error("batch_resolve_my_bugs.projectSetId must be a number >= 1");
     }
     if (args.listPath !== undefined && typeof args.listPath !== "string") {
       throw new Error("batch_resolve_my_bugs.listPath must be a string");
