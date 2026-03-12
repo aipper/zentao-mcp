@@ -4,10 +4,25 @@
   "private": false,
   "type": "module",
   "description": "A minimal MCP server for ZenTao (token + generic REST call + a few helper tools).",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "src/index.js",
   "bin": {
     "zentao-mcp-server": "bin/zentao-mcp-server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "zentao",
+    "bug-tracking",
+    "project-management",
+    "api-client"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aipper/zentao-mcp.git"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -16,6 +31,6 @@
     "release:npm": "bash scripts/release-npm.sh"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "latest"
+    "@modelcontextprotocol/sdk": "^1.27.1"
   }
 }

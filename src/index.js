@@ -7,6 +7,20 @@ import {
 } from "./tools.js";
 import { createZenTaoClient } from "./zentao.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8"));
+
+const DEBUG = process.env.ZENTAO_DEBUG === "true";
+
+function log(...args) {
+  if (DEBUG) {
+    process.stderr.write(`[zentao-mcp] ${args.join(" ")}\n`);
+  }
+}
 
 const KNOWN_TOOL_NAMES = new Set([
   "get_token",
@@ -39,6 +53,15 @@ function normalizeToolName(rawName) {
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required env: ${name}`);
+
+  // Security check: warn if using HTTP instead of HTTPS
+  if (name === "ZENTAO_BASE_URL" && value.startsWith("http://")) {
+    process.stderr.write(
+      "⚠️  WARNING: Using HTTP instead of HTTPS is insecure! " +
+      "Your credentials and data will be transmitted in plain text.\n"
+    );
+  }
+
   return value;
 }
 
@@ -81,13 +104,25 @@ function getConfigFromEnv() {
 }
 
 async function main() {
+  log("Starting zentao-mcp-server version", pkg.version);
+
   const config = getConfigFromEnv();
+  log("Config loaded:", {
+    baseUrl: config.baseUrl,
+    apiPrefix: config.apiPrefix,
+    account: config.auth.account,
+    productId: config.defaultProductId,
+    projectSetId: config.defaultProjectSetId,
+  });
+
   const zentao = createZenTaoClient(config);
 
   const server = new Server(
-    { name: "zentao-mcp-server", version: "0.1.0" },
+    { name: pkg.name, version: pkg.version },
     { capabilities: { tools: {} } }
   );
+
+  log("MCP server initialized");
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: TOOLS };
@@ -97,6 +132,8 @@ async function main() {
     const rawToolName = req.params?.name;
     const toolName = normalizeToolName(rawToolName);
     const args = req.params?.arguments || {};
+
+    log(`Tool call: ${toolName}`, JSON.stringify(args));
 
     try {
       assertToolArgs(toolName, args);
@@ -208,6 +245,8 @@ async function main() {
 
       throw new Error(`Unknown tool: ${rawToolName}`);
     } catch (err) {
+      log(`Tool error: ${toolName}`, err?.message || err);
+
       const errorPayload = {
         ok: false,
         tool: rawToolName,
@@ -223,6 +262,8 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  log("MCP server connected and ready");
 }
 
 main().catch((err) => {

@@ -1,11 +1,35 @@
+// Constants
+const DEFAULT_RESOLUTION_PREFIX = "解决说明：";
+const DEFAULT_RESOLUTION_FALLBACK = "已处理";
+const MAX_ERROR_TEXT_LENGTH = 2000;
+
+/**
+ * Sleep for a specified duration
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Check if a value looks like an absolute URL
+ * @param {string} value - Value to check
+ * @returns {boolean}
+ */
 function isProbablyAbsoluteUrl(value) {
   return /^https?:\/\//i.test(value);
 }
 
+/**
+ * Build a full URL from base, prefix, path and query parameters
+ * @param {Object} params
+ * @param {string} params.baseUrl - Base URL
+ * @param {string} params.apiPrefix - API prefix
+ * @param {string} params.path - Relative path
+ * @param {Object} [params.query] - Query parameters
+ * @returns {URL}
+ */
 function buildUrl({ baseUrl, apiPrefix, path, query }) {
   if (!path) throw new Error("path is required");
   if (isProbablyAbsoluteUrl(path)) {
@@ -24,12 +48,35 @@ function buildUrl({ baseUrl, apiPrefix, path, query }) {
   return url;
 }
 
+/**
+ * Create an abort signal with timeout
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {{signal: AbortSignal, cleanup: Function}}
+ */
 function createAbortSignal(timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("Request timeout")), timeoutMs);
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
+/**
+ * Create a ZenTao API client
+ * @param {Object} config - Client configuration
+ * @param {string} config.baseUrl - ZenTao base URL
+ * @param {string} config.apiPrefix - API prefix path
+ * @param {string} config.tokenPath - Token endpoint path
+ * @param {number} config.tokenTtlMs - Token TTL in milliseconds
+ * @param {number} config.timeoutMs - Request timeout in milliseconds
+ * @param {number} [config.defaultProductId] - Default product ID
+ * @param {number} [config.defaultProjectSetId] - Default project set ID
+ * @param {string} [config.myBugsPath] - My bugs path
+ * @param {string[]} [config.bugsFallbackPaths] - Bug fallback paths
+ * @param {string[]} [config.projectSetBugsPaths] - Project set bug paths
+ * @param {Object} config.auth - Authentication credentials
+ * @param {string} config.auth.account - Account name
+ * @param {string} config.auth.password - Account password
+ * @returns {Object} ZenTao client instance
+ */
 export function createZenTaoClient(config) {
   const {
     baseUrl,
@@ -56,7 +103,7 @@ export function createZenTaoClient(config) {
       const contentType = resp.headers.get("content-type") || "";
       const data = contentType.includes("application/json") ? safeJsonParse(text) : text;
       if (!resp.ok) {
-        const err = new Error(`Request failed ${resp.status}: ${truncate(String(text), 2000)}`);
+        const err = new Error(`Request failed ${resp.status}: ${truncate(String(text), MAX_ERROR_TEXT_LENGTH)}`);
         err.status = resp.status;
         err.data = data;
         throw err;
@@ -253,12 +300,20 @@ export function createZenTaoClient(config) {
     };
   }
 
+  /**
+   * Build resolution comment from solution, comment or resolution
+   * @param {Object} params
+   * @param {string} [params.solution] - Solution description (preferred)
+   * @param {string} [params.comment] - Comment text
+   * @param {string} [params.resolution] - Resolution type
+   * @returns {string} Formatted comment
+   */
   function buildResolutionComment({ solution, comment, resolution }) {
     const normalizedSolution = String(solution || "").trim();
-    if (normalizedSolution) return `解决说明：${normalizedSolution}`;
+    if (normalizedSolution) return `${DEFAULT_RESOLUTION_PREFIX}${normalizedSolution}`;
     const normalizedComment = String(comment || "").trim();
     if (normalizedComment) return normalizedComment;
-    return `已处理，resolution=${String(resolution || "fixed")}`;
+    return `${DEFAULT_RESOLUTION_FALLBACK}，resolution=${String(resolution || "fixed")}`;
   }
 
   function getBugAssignee(bug) {
@@ -515,9 +570,9 @@ export function createZenTaoClient(config) {
       if (!candidatePaths.includes(fallback)) candidatePaths.push(fallback);
     }
 
-    let bestResult = null;
     let lastErr = null;
     const triedPaths = [];
+    const successful = [];
     for (const candidate of candidatePaths) {
       try {
         const query = buildBugsQueryForPath({ path: candidate, ...baseQuery });
@@ -532,27 +587,13 @@ export function createZenTaoClient(config) {
           matched: filtered.length,
         });
 
-        const currentResult = {
+        successful.push({
+          path: candidate,
+          status: resp?.status ?? null,
           total: bugs.length,
           matched: filtered.length,
-          page: safePage,
-          limit: safeLimit,
-          productId: effectiveProductId,
-          projectSetId: effectiveProjectSetId,
-          assignedTo: assignee,
-          bugs: filtered,
-          raw: { status: resp?.status, path: candidate },
-        };
-
-        if (
-          !bestResult ||
-          currentResult.matched > bestResult.matched ||
-          (currentResult.matched === bestResult.matched && currentResult.total > bestResult.total)
-        ) {
-          bestResult = currentResult;
-        }
-
-        if (currentResult.matched > 0) break;
+          bugs,
+        });
       } catch (err) {
         lastErr = err;
         triedPaths.push({
@@ -564,13 +605,49 @@ export function createZenTaoClient(config) {
         if (candidate !== primaryPath) continue;
       }
     }
-    if (!bestResult) throw lastErr;
+    if (successful.length === 0) throw lastErr;
+
+    const mergedBugs = [];
+    const seenBugIds = new Set();
+    for (const result of successful) {
+      for (const bug of result.bugs || []) {
+        const bugId = getBugId(bug);
+        if (bugId) {
+          if (seenBugIds.has(bugId)) continue;
+          seenBugIds.add(bugId);
+        }
+        mergedBugs.push(bug);
+      }
+    }
+
+    const mergedFiltered = mergedBugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
+    const best = successful.reduce((acc, cur) => {
+      if (!acc) return cur;
+      if (cur.matched > acc.matched) return cur;
+      if (cur.matched === acc.matched && cur.total > acc.total) return cur;
+      return acc;
+    }, null);
 
     return {
-      ...bestResult,
+      total: mergedBugs.length,
+      matched: mergedFiltered.length,
+      page: safePage,
+      limit: safeLimit,
+      productId: effectiveProductId,
+      projectSetId: effectiveProjectSetId,
+      assignedTo: assignee,
+      bugs: mergedFiltered,
       raw: {
-        ...bestResult.raw,
+        status: best?.status ?? null,
+        path: best?.path ?? primaryPath,
         triedPaths,
+        paths: successful.map((r) => ({
+          path: r.path,
+          status: r.status,
+          total: r.total,
+          matched: r.matched,
+        })),
+        merged: successful.length > 1,
       },
     };
   }

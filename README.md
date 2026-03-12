@@ -11,6 +11,9 @@
 ## 依赖
 - Node.js 18+（需要内置 `fetch`）
 
+## License
+MIT - 详见 [LICENSE](./LICENSE) 文件
+
 ## 配置
 复制 `.env.example` 为 `.env` 并填写：
 - `ZENTAO_BASE_URL`
@@ -93,8 +96,8 @@ npm run smoke
 - `env` 是否完整传入（尤其是 `ZENTAO_BASE_URL`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`）。
 - 若报 `Need product id`，请设置 `ZENTAO_PRODUCT_ID`，或在 `get_my_bugs` 传 `productId`。
 - 若你的 bug 在“项目集/我的视角”而非产品，建议设置 `ZENTAO_PROJECT_SET_ID`，并配置 `ZENTAO_MY_BUGS_PATH=/my/bug`。
-- `get_my_bugs` 会按候选路径回退（包含项目集路径）；即使首个路径返回空列表也会继续尝试。
-- 排查时看工具返回里的 `raw.triedPaths`，可确认每条路径的返回码与命中数量。
+- `get_my_bugs` 会按候选路径回退（包含项目集路径）；即使首个路径返回空列表也会继续尝试，并会把多端点结果合并去重。
+- 排查时看工具返回里的 `raw.triedPaths` / `raw.paths`，可确认每条路径的返回码与命中数量。
 - `ZENTAO_API_PREFIX`/`ZENTAO_TOKEN_PATH` 是否和你的禅道实例一致。
 - MCP 客户端是否真的在执行 `npx -y @aipper/zentao-mcp-server`（而不是旧的本地命令）。
 - 客户端日志中是否有启动报错（如找不到命令、401、超时）。
@@ -124,8 +127,16 @@ npm run smoke
 - `comment_bug`：`{"id":123,"comment":"已复现，正在定位根因"}`
 
 ## 安全建议
+- **强烈建议使用 HTTPS**：HTTP 会明文传输账号密码和数据，存在安全风险。
 - 使用最小权限账号（仅需要的项目权限），避免使用管理员账号。
 - 默认 `get_token` 不回显完整 token；如确需调试，可设 `ZENTAO_EXPOSE_TOKEN=true`。
+
+## 调试
+如需查看详细日志，可设置环境变量：
+```bash
+ZENTAO_DEBUG=true npx -y @aipper/zentao-mcp-server
+```
+日志会输出到 stderr，不影响 MCP 协议通信。
 
 ## 发布到 npm
 脚本：`scripts/release-npm.sh`（参考 `aiws` 的发布流程，默认 dry-run）。
