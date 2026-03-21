@@ -12,11 +12,12 @@ function getConfigFromEnv() {
   const tokenPath = process.env.ZENTAO_TOKEN_PATH || `${apiPrefix}/tokens`;
   const tokenTtlMs = Number(process.env.ZENTAO_TOKEN_TTL_MS || "3000000");
   const timeoutMs = Number(process.env.ZENTAO_HTTP_TIMEOUT_MS || "30000");
+  const allowInsecureHttp = String(process.env.ZENTAO_ALLOW_INSECURE_HTTP || "false").toLowerCase() === "true";
 
   const account = requireEnv("ZENTAO_ACCOUNT");
   const password = requireEnv("ZENTAO_PASSWORD");
 
-  return { baseUrl, apiPrefix, tokenPath, tokenTtlMs, timeoutMs, auth: { account, password } };
+  return { baseUrl, apiPrefix, tokenPath, tokenTtlMs, timeoutMs, allowInsecureHttp, auth: { account, password } };
 }
 
 async function main() {

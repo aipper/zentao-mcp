@@ -2,6 +2,8 @@
 const DEFAULT_RESOLUTION_PREFIX = "解决说明：";
 const DEFAULT_RESOLUTION_FALLBACK = "已处理";
 const MAX_ERROR_TEXT_LENGTH = 2000;
+const MAX_BATCH_RESOLVE_ITEMS = 100;
+const SAFE_BUG_LIST_PATHS = new Set(["/bugs", "/my/bug", "/my/bugs"]);
 
 /**
  * Sleep for a specified duration
@@ -21,6 +23,30 @@ function isProbablyAbsoluteUrl(value) {
   return /^https?:\/\//i.test(value);
 }
 
+function assertSafeRelativePath(value, fieldName) {
+  const raw = String(value || "").trim();
+  if (!raw) throw new Error(`${fieldName} is required`);
+  if (isProbablyAbsoluteUrl(raw)) {
+    throw new Error(`${fieldName} must be a relative path`);
+  }
+  if (raw.startsWith("//")) {
+    throw new Error(`${fieldName} must not be protocol-relative`);
+  }
+
+  const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+  if (normalized.includes("?") || normalized.includes("#")) {
+    throw new Error(`${fieldName} must not include query or hash`);
+  }
+  const lowered = normalized.toLowerCase();
+  if (lowered.includes("\\") || lowered.includes("%5c") || lowered.includes("%2f")) {
+    throw new Error(`${fieldName} must not contain backslashes or encoded separators`);
+  }
+  if (/(^|\/)\.{1,2}(?:\/|$)/.test(normalized) || lowered.includes("%2e")) {
+    throw new Error(`${fieldName} must not contain dot segments`);
+  }
+  return normalized;
+}
+
 /**
  * Build a full URL from base, prefix, path and query parameters
  * @param {Object} params
@@ -31,13 +57,13 @@ function isProbablyAbsoluteUrl(value) {
  * @returns {URL}
  */
 function buildUrl({ baseUrl, apiPrefix, path, query }) {
-  if (!path) throw new Error("path is required");
-  if (isProbablyAbsoluteUrl(path)) {
-    throw new Error("path must be relative (absolute URL is not allowed)");
-  }
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const prefix = apiPrefix.startsWith("/") ? apiPrefix : `/${apiPrefix}`;
+  const normalizedPath = assertSafeRelativePath(path, "path");
+  const prefix = assertSafeRelativePath(apiPrefix, "apiPrefix").replace(/\/+$/, "");
   const url = new URL(`${baseUrl}${prefix}${normalizedPath}`);
+  const allowedPrefix = `${prefix}/`;
+  if (url.pathname !== prefix && !url.pathname.startsWith(allowedPrefix)) {
+    throw new Error("path escapes apiPrefix");
+  }
 
   if (query && typeof query === "object") {
     for (const [k, v] of Object.entries(query)) {
@@ -84,6 +110,7 @@ export function createZenTaoClient(config) {
     tokenPath,
     tokenTtlMs,
     timeoutMs,
+    allowInsecureHttp,
     defaultProductId,
     defaultProjectSetId,
     myBugsPath,
@@ -92,23 +119,36 @@ export function createZenTaoClient(config) {
     auth,
   } = config;
 
+  const normalizedBaseUrl = String(baseUrl || "").replace(/\/+$/, "");
+  const parsedBaseUrl = new URL(normalizedBaseUrl);
+  if (parsedBaseUrl.protocol !== "https:" && !(allowInsecureHttp && parsedBaseUrl.protocol === "http:")) {
+    throw new Error("baseUrl must use HTTPS unless allowInsecureHttp=true");
+  }
+  const normalizedApiPrefix = assertSafeRelativePath(apiPrefix, "apiPrefix").replace(/\/+$/, "");
+  const normalizedTokenPath = assertSafeRelativePath(tokenPath, "tokenPath");
+  const baseOrigin = parsedBaseUrl.origin;
+  const baseProtocol = parsedBaseUrl.protocol;
+  const basePathname = parsedBaseUrl.pathname.replace(/\/+$/, "");
+  const deploymentBaseUrl = `${baseOrigin}${basePathname || ""}/`;
+
   let cachedToken = "";
   let cachedAt = 0;
 
   async function fetchJson(url, { method, headers, body }) {
     const { signal, cleanup } = createAbortSignal(timeoutMs);
     try {
-      const resp = await fetch(url, { method, headers, body, signal });
+      const resp = await fetch(url, { method, headers, body, signal, redirect: "error" });
       const text = await resp.text();
       const contentType = resp.headers.get("content-type") || "";
       const data = contentType.includes("application/json") ? safeJsonParse(text) : text;
       if (!resp.ok) {
-        const err = new Error(`Request failed ${resp.status}: ${truncate(String(text), MAX_ERROR_TEXT_LENGTH)}`);
+        const err = new Error(`Request failed ${resp.status}`);
         err.status = resp.status;
         err.data = data;
+        err.responseText = truncate(String(text), MAX_ERROR_TEXT_LENGTH);
         throw err;
       }
-      return { status: resp.status, headers: Object.fromEntries(resp.headers.entries()), data };
+      return { status: resp.status, data };
     } finally {
       cleanup();
     }
@@ -133,6 +173,12 @@ export function createZenTaoClient(config) {
     return Date.now() - cachedAt > tokenTtlMs;
   }
 
+  function resolveAgainstDeploymentPath(path) {
+    const normalizedPath = assertSafeRelativePath(path, "path");
+    const relativePath = normalizedPath.replace(/^\/+/, "");
+    return new URL(relativePath, deploymentBaseUrl);
+  }
+
   async function getToken({ force } = {}) {
     if (!force && !tokenExpired()) {
       return { token: cachedToken, source: "cache" };
@@ -142,7 +188,7 @@ export function createZenTaoClient(config) {
     }
 
     // 兼容性：不同禅道版本 token 接口可能不同；先按常见 v1 约定尝试
-    const url = new URL(tokenPath, baseUrl);
+    const url = resolveAgainstDeploymentPath(normalizedTokenPath);
     const payload = { account: auth.account, password: auth.password };
     const resp = await fetchJson(url, {
       method: "POST",
@@ -168,7 +214,7 @@ export function createZenTaoClient(config) {
 
   async function call({ path, method = "GET", query, body } = {}) {
     const tokenInfo = await getToken();
-    const url = buildUrl({ baseUrl, apiPrefix, path, query });
+    const url = buildUrl({ baseUrl: normalizedBaseUrl, apiPrefix: normalizedApiPrefix, path, query });
 
     const headers = { Token: tokenInfo.token };
     let payload;
@@ -221,6 +267,30 @@ export function createZenTaoClient(config) {
     return [];
   }
 
+  function parseProductsFromResponse(data) {
+    if (Array.isArray(data?.products)) return data.products;
+    if (Array.isArray(data?.data?.products)) return data.data.products;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data)) return data;
+    return [];
+  }
+
+  function parseProjectsFromResponse(data) {
+    if (Array.isArray(data?.projects)) return data.projects;
+    if (Array.isArray(data?.data?.projects)) return data.data.projects;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data)) return data;
+    return [];
+  }
+
+  function parseProgramsFromResponse(data) {
+    if (Array.isArray(data?.programs)) return data.programs;
+    if (Array.isArray(data?.data?.programs)) return data.data.programs;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data)) return data;
+    return [];
+  }
+
   function parseBugDetailFromResponse(data) {
     if (data?.bug && typeof data.bug === "object") return data.bug;
     if (data?.data?.bug && typeof data.data.bug === "object") return data.data.bug;
@@ -255,7 +325,8 @@ export function createZenTaoClient(config) {
   function buildMyBugsPath(pathTemplate) {
     const template = String(pathTemplate || "").trim();
     if (!template) return "";
-    return template.replaceAll("{account}", encodeURIComponent(auth.account || ""));
+    const resolved = template.replaceAll("{account}", encodeURIComponent(auth.account || ""));
+    return assertSafeRelativePath(resolved, "myBugsPath");
   }
 
   function buildProjectSetPath(pathTemplate, projectSetId) {
@@ -263,7 +334,8 @@ export function createZenTaoClient(config) {
     if (!template) return "";
     const pid = normalizePositiveInt(projectSetId);
     if (!pid) return "";
-    return template.replaceAll("{projectSetId}", String(pid));
+    const resolved = template.replaceAll("{projectSetId}", String(pid));
+    return assertSafeRelativePath(resolved, "projectSetBugsPath");
   }
 
   function isMyBugsPath(path) {
@@ -284,6 +356,26 @@ export function createZenTaoClient(config) {
   function isNeedProductIdError(err) {
     const merged = `${String(err?.message || "")} ${JSON.stringify(err?.data || "")}`.toLowerCase();
     return merged.includes("need product id");
+  }
+
+  function normalizeBugsListPath(path) {
+    const normalizedPath = String(path || "/bugs").trim() || "/bugs";
+    if (!SAFE_BUG_LIST_PATHS.has(normalizedPath)) {
+      throw new Error("path must be one of /bugs, /my/bug, /my/bugs");
+    }
+    return normalizedPath;
+  }
+
+  function buildProgramProductsPath(projectSetId) {
+    const pid = normalizePositiveInt(projectSetId);
+    if (!pid) return "";
+    return `/programs/${pid}/products`;
+  }
+
+  function buildProgramProjectsPath(projectSetId) {
+    const pid = normalizePositiveInt(projectSetId);
+    if (!pid) return "";
+    return `/programs/${pid}/projects`;
   }
 
   function buildBugsQueryForPath({ path, limit, page, assignedTo, status, productId }) {
@@ -316,13 +408,33 @@ export function createZenTaoClient(config) {
     return `${DEFAULT_RESOLUTION_FALLBACK}，resolution=${String(resolution || "fixed")}`;
   }
 
+  function normalizeUserIdentity(value) {
+    if (!value) return "";
+    if (typeof value === "string" || typeof value === "number") {
+      return String(value);
+    }
+    if (typeof value === "object") {
+      return (
+        value.account ||
+        value.username ||
+        value.userName ||
+        value.realname ||
+        value.realName ||
+        value.name ||
+        value.id ||
+        ""
+      );
+    }
+    return "";
+  }
+
   function getBugAssignee(bug) {
-    return (
-      bug?.assignedTo ||
-      bug?.assignedto ||
-      bug?.assigned_to ||
-      bug?.assignedUser ||
-      bug?.owner ||
+    return normalizeUserIdentity(
+      bug?.assignedTo ??
+      bug?.assignedto ??
+      bug?.assigned_to ??
+      bug?.assignedUser ??
+      bug?.owner ??
       ""
     );
   }
@@ -360,40 +472,25 @@ export function createZenTaoClient(config) {
     return true;
   }
 
-  function buildBugDetailPath({ id, path }) {
+  function buildBugDetailPath({ id }) {
     const normalizedId = Number(id);
-    const basePath = path || "/bugs/{id}";
-    if (basePath.includes("{id}")) {
-      return basePath.replaceAll("{id}", String(normalizedId));
-    }
-    const trimmed = basePath.replace(/\/+$/, "");
-    return `${trimmed}/${normalizedId}`;
+    return `/bugs/${normalizedId}`;
   }
 
-  function buildBugResolvePath({ id, path }) {
-    return buildBugTransitionPath({ id, path, action: "resolve" });
+  function buildBugResolvePath({ id }) {
+    return buildBugTransitionPath({ id, action: "resolve" });
   }
 
-  function buildBugCommentPath({ id, path }) {
+  function buildBugCommentPath({ id }) {
     const normalizedId = Number(id);
-    const basePath = path || "/bugs/{id}/comment";
-    if (basePath.includes("{id}")) {
-      return basePath.replaceAll("{id}", String(normalizedId));
-    }
-    const trimmed = basePath.replace(/\/+$/, "");
-    return `${trimmed}/${normalizedId}/comment`;
+    return `/bugs/${normalizedId}/comment`;
   }
 
-  function buildBugTransitionPath({ id, path, action }) {
+  function buildBugTransitionPath({ id, action }) {
     const normalizedId = Number(id);
     const safeAction = String(action || "").trim();
     if (!safeAction) throw new Error("buildBugTransitionPath requires action");
-    const basePath = path || `/bugs/{id}/${safeAction}`;
-    if (basePath.includes("{id}")) {
-      return basePath.replaceAll("{id}", String(normalizedId));
-    }
-    const trimmed = basePath.replace(/\/+$/, "");
-    return `${trimmed}/${normalizedId}/${safeAction}`;
+    return `/bugs/${normalizedId}/${safeAction}`;
   }
 
   function getBugId(bug) {
@@ -412,17 +509,153 @@ export function createZenTaoClient(config) {
     if (!raw) return "";
     if (raw.startsWith("data:")) return "";
     const cleaned = raw.replaceAll("&amp;", "&");
-    if (/^https?:\/\//i.test(cleaned)) return cleaned;
-    if (cleaned.startsWith("//")) {
-      const protocol = new URL(baseUrl).protocol || "https:";
-      return `${protocol}${cleaned}`;
+    try {
+      const candidate = /^https?:\/\//i.test(cleaned)
+        ? new URL(cleaned)
+        : cleaned.startsWith("//")
+          ? new URL(`${baseProtocol}${cleaned}`)
+          : cleaned.startsWith("/")
+            ? resolveAgainstDeploymentPath(cleaned)
+            : resolveAgainstDeploymentPath(`/${cleaned.replace(/^\.?\//, "")}`);
+      if (candidate.origin !== baseOrigin) return "";
+      return candidate.toString();
+    } catch {
+      return "";
     }
-    if (cleaned.startsWith("/")) {
-      return new URL(cleaned, `${baseUrl}/`).toString();
+  }
+
+  function sanitizeTextContent(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+
+    return text
+      .replace(/<img\b[^>]*>/gi, "")
+      .replace(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/gi, "")
+      .replace(/https?:\/\/[^\s"'<>]+/gi, (match) => normalizeResourceUrl(match) ? match : "")
+      .trim();
+  }
+
+  function hasMeaningfulValue(value) {
+    return value !== undefined && value !== null && value !== "";
+  }
+
+  function pickFirstValue(source, aliases) {
+    if (!source || typeof source !== "object") return undefined;
+    for (const alias of aliases) {
+      const value = source[alias];
+      if (hasMeaningfulValue(value)) return value;
     }
-    const normalized = cleaned.replace(/^\.?\//, "");
-    if (!normalized) return "";
-    return new URL(`/${normalized}`, `${baseUrl}/`).toString();
+    return undefined;
+  }
+
+  function assignCanonicalValue(target, fieldName, source, aliases, options = {}) {
+    const { sanitizeText = false, transform } = options;
+    const rawValue = pickFirstValue(source, aliases);
+    if (!hasMeaningfulValue(rawValue)) return;
+
+    let value = sanitizeText ? sanitizeTextContent(rawValue) : rawValue;
+    if (typeof transform === "function") {
+      value = transform(value);
+    }
+    if (hasMeaningfulValue(value)) {
+      target[fieldName] = value;
+    }
+  }
+
+  function sanitizeFileRecord(record) {
+    if (!record || typeof record !== "object") return null;
+
+    const safe = {};
+    for (const key of [
+      "id",
+      "title",
+      "name",
+      "extension",
+      "ext",
+      "size",
+      "mime",
+      "contentType",
+      "addedBy",
+      "addedDate",
+      "createdBy",
+      "createdDate",
+    ]) {
+      if (record[key] !== undefined && record[key] !== null && record[key] !== "") {
+        safe[key] = record[key];
+      }
+    }
+
+    const url = normalizeResourceUrl(
+      record.webPath ||
+      record.url ||
+      record.downloadUrl ||
+      record.downloadurl ||
+      record.path ||
+      record.pathname ||
+      record.viewUrl ||
+      record.href
+    );
+    if (url) safe.url = url;
+
+    return Object.keys(safe).length > 0 ? safe : null;
+  }
+
+  function sanitizeFileCollection(files) {
+    if (!files) return [];
+    const list = Array.isArray(files) ? files : Object.values(files);
+    return list
+      .map((item) => sanitizeFileRecord(item))
+      .filter(Boolean);
+  }
+
+  function buildSafeBugDetail(bug) {
+    if (!bug || typeof bug !== "object") return null;
+
+    const safeBug = {};
+    const bugId = getBugId(bug);
+    if (bugId) safeBug.id = bugId;
+
+    const scalarFieldMappings = [
+      ["title", ["title"]],
+      ["status", ["status"]],
+      ["severity", ["severity"]],
+      ["pri", ["pri"]],
+      ["type", ["type"]],
+      ["openedBy", ["openedBy", "openedby", "opened_by"], { transform: normalizeUserIdentity }],
+      ["openedDate", ["openedDate", "openeddate", "opened_date"]],
+      ["assignedTo", ["assignedTo", "assignedto", "assigned_to", "assignedUser", "owner"], { transform: normalizeUserIdentity }],
+      ["resolvedBy", ["resolvedBy", "resolvedby", "resolved_by"], { transform: normalizeUserIdentity }],
+      ["resolvedDate", ["resolvedDate", "resolveddate", "resolved_date"]],
+      ["closedBy", ["closedBy", "closedby", "closed_by"], { transform: normalizeUserIdentity }],
+      ["closedDate", ["closedDate", "closeddate", "closed_date"]],
+      ["product", ["product"]],
+      ["project", ["project"]],
+      ["projectSet", ["projectSet", "projectset", "project_set", "projectSetId", "projectsetid", "project_set_id"]],
+      ["module", ["module"]],
+      ["branch", ["branch"]],
+      ["story", ["story"]],
+      ["task", ["task"]],
+      ["deadline", ["deadline"]],
+      ["keywords", ["keywords"]],
+    ];
+    for (const [fieldName, aliases, options] of scalarFieldMappings) {
+      assignCanonicalValue(safeBug, fieldName, bug, aliases, options);
+    }
+
+    assignCanonicalValue(safeBug, "resolution", bug, ["resolution"], { sanitizeText: true });
+    assignCanonicalValue(safeBug, "steps", bug, ["steps", "stepsHtml", "reproStep", "reprostep"], { sanitizeText: true });
+    assignCanonicalValue(safeBug, "comment", bug, ["comment"], { sanitizeText: true });
+
+    const files = sanitizeFileCollection(bug.files);
+    if (files.length > 0) safeBug.files = files;
+
+    const attachments = sanitizeFileCollection(bug.attachments);
+    if (attachments.length > 0) safeBug.attachments = attachments;
+
+    const openedFiles = sanitizeFileCollection(bug.openedFiles);
+    if (openedFiles.length > 0) safeBug.openedFiles = openedFiles;
+
+    return safeBug;
   }
 
   function isImageLikeText(value) {
@@ -517,17 +750,18 @@ export function createZenTaoClient(config) {
     productId,
     projectSetId,
     path = "/bugs",
-    assignedTo,
   } = {}) {
     const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
     const safePage = Math.max(1, Number(page) || 1);
-    const assignee = normalizeString(assignedTo) || normalizeString(auth.account);
+    const dashboardScanLimit = Math.max(safeLimit, 100);
+    const assignee = normalizeString(auth.account);
     const effectiveProductId = normalizePositiveInt(productId) || normalizePositiveInt(defaultProductId);
     const effectiveProjectSetId = normalizePositiveInt(projectSetId) || normalizePositiveInt(defaultProjectSetId);
-    const primaryPath = buildProductScopedBugsPath({ productId: effectiveProductId, path });
+    const requestedPath = normalizeBugsListPath(path);
+    const primaryPath = buildProductScopedBugsPath({ productId: effectiveProductId, path: requestedPath });
     const preferProjectSetPath =
       effectiveProjectSetId &&
-      (!path || String(path).trim() === "" || String(path).trim() === "/bugs");
+      requestedPath === "/bugs";
     const configuredMyBugsPath = buildMyBugsPath(myBugsPath);
     const fallbackPathCandidates = (bugsFallbackPaths && bugsFallbackPaths.length > 0)
       ? bugsFallbackPaths
@@ -605,6 +839,241 @@ export function createZenTaoClient(config) {
         if (candidate !== primaryPath) continue;
       }
     }
+
+    if (effectiveProjectSetId) {
+      const programProductsPath = buildProgramProductsPath(effectiveProjectSetId);
+      if (programProductsPath) {
+        try {
+          const productsResp = await call({
+            path: programProductsPath,
+            method: "GET",
+            query: { limit: safeLimit, page: safePage },
+          });
+          const products = parseProductsFromResponse(productsResp?.data);
+          const productIds = products
+            .map((product) => normalizePositiveInt(product?.id ?? product?.productId ?? product?.productID))
+            .filter(Boolean);
+
+          triedPaths.push({
+            path: programProductsPath,
+            status: productsResp?.status ?? null,
+            total: productIds.length,
+            matched: 0,
+          });
+
+          for (const scopedProductId of productIds) {
+            const productPath = `/products/${scopedProductId}/bugs`;
+            try {
+              const query = buildBugsQueryForPath({
+                path: productPath,
+                limit: safeLimit,
+                page: safePage,
+                assignedTo: assignee,
+                status,
+                productId: scopedProductId,
+              });
+              const resp = await call({ path: productPath, method: "GET", query });
+              const bugs = parseBugsFromResponse(resp?.data);
+              const filtered = bugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
+
+              triedPaths.push({
+                path: productPath,
+                status: resp?.status ?? null,
+                total: bugs.length,
+                matched: filtered.length,
+              });
+
+              successful.push({
+                path: productPath,
+                status: resp?.status ?? null,
+                total: bugs.length,
+                matched: filtered.length,
+                bugs,
+              });
+            } catch (err) {
+              lastErr = err;
+              triedPaths.push({
+                path: productPath,
+                status: err?.status ?? null,
+                error: String(err?.message || err),
+              });
+            }
+          }
+        } catch (err) {
+          lastErr = err;
+          triedPaths.push({
+            path: programProductsPath,
+            status: err?.status ?? null,
+            error: String(err?.message || err),
+          });
+        }
+      }
+
+      const programProjectsPath = buildProgramProjectsPath(effectiveProjectSetId);
+      if (programProjectsPath) {
+        try {
+          const projectsResp = await call({
+            path: programProjectsPath,
+            method: "GET",
+            query: { limit: safeLimit, page: safePage },
+          });
+          const projects = parseProjectsFromResponse(projectsResp?.data);
+          const projectIds = projects
+            .map((project) => normalizePositiveInt(project?.id ?? project?.projectId ?? project?.projectID))
+            .filter(Boolean);
+
+          triedPaths.push({
+            path: programProjectsPath,
+            status: projectsResp?.status ?? null,
+            total: projectIds.length,
+            matched: 0,
+          });
+
+          for (const scopedProjectId of projectIds) {
+            const projectPath = `/projects/${scopedProjectId}/bugs`;
+            try {
+              const resp = await call({
+                path: projectPath,
+                method: "GET",
+                query: { limit: safeLimit, page: safePage, assignedTo: assignee },
+              });
+              const bugs = parseBugsFromResponse(resp?.data);
+              const filtered = bugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
+
+              triedPaths.push({
+                path: projectPath,
+                status: resp?.status ?? null,
+                total: bugs.length,
+                matched: filtered.length,
+              });
+
+              successful.push({
+                path: projectPath,
+                status: resp?.status ?? null,
+                total: bugs.length,
+                matched: filtered.length,
+                bugs,
+              });
+            } catch (err) {
+              lastErr = err;
+              triedPaths.push({
+                path: projectPath,
+                status: err?.status ?? null,
+                error: String(err?.message || err),
+              });
+            }
+          }
+        } catch (err) {
+          lastErr = err;
+          triedPaths.push({
+            path: programProjectsPath,
+            status: err?.status ?? null,
+            error: String(err?.message || err),
+          });
+        }
+      }
+    }
+
+    if (!effectiveProjectSetId && !effectiveProductId && successful.length === 0) {
+      try {
+        const programsResp = await call({
+          path: "/programs",
+          method: "GET",
+          query: { limit: 100, page: 1 },
+        });
+        const programs = parseProgramsFromResponse(programsResp?.data);
+        const programIds = programs
+          .map((program) => normalizePositiveInt(program?.id ?? program?.projectSetId ?? program?.programId))
+          .filter(Boolean);
+        const scannedProjectIds = new Set();
+
+        triedPaths.push({
+          path: "/programs",
+          status: programsResp?.status ?? null,
+          total: programIds.length,
+          matched: 0,
+        });
+
+        for (const scopedProgramId of programIds) {
+          const programProjectsPath = `/programs/${scopedProgramId}/projects`;
+          try {
+            const projectsResp = await call({
+              path: programProjectsPath,
+              method: "GET",
+              query: { limit: 100, page: 1 },
+            });
+            const projects = parseProjectsFromResponse(projectsResp?.data);
+            const projectIds = projects
+              .map((project) => normalizePositiveInt(project?.id ?? project?.projectId ?? project?.projectID))
+              .filter(Boolean);
+
+            triedPaths.push({
+              path: programProjectsPath,
+              status: projectsResp?.status ?? null,
+              total: projectIds.length,
+              matched: 0,
+            });
+
+            for (const scopedProjectId of projectIds) {
+              if (scannedProjectIds.has(scopedProjectId)) continue;
+              scannedProjectIds.add(scopedProjectId);
+              const projectPath = `/projects/${scopedProjectId}/bugs`;
+              try {
+                const resp = await call({
+                  path: projectPath,
+                  method: "GET",
+                  query: {
+                    limit: dashboardScanLimit,
+                    page: safePage,
+                    assignedTo: assignee,
+                    status: status || undefined,
+                  },
+                });
+                const bugs = parseBugsFromResponse(resp?.data);
+                const filtered = bugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
+
+                triedPaths.push({
+                  path: projectPath,
+                  status: resp?.status ?? null,
+                  total: bugs.length,
+                  matched: filtered.length,
+                });
+
+                successful.push({
+                  path: projectPath,
+                  status: resp?.status ?? null,
+                  total: bugs.length,
+                  matched: filtered.length,
+                  bugs,
+                });
+              } catch (err) {
+                lastErr = err;
+                triedPaths.push({
+                  path: projectPath,
+                  status: err?.status ?? null,
+                  error: String(err?.message || err),
+                });
+              }
+            }
+          } catch (err) {
+            lastErr = err;
+            triedPaths.push({
+              path: programProjectsPath,
+              status: err?.status ?? null,
+              error: String(err?.message || err),
+            });
+          }
+        }
+      } catch (err) {
+        lastErr = err;
+        triedPaths.push({
+          path: "/programs",
+          status: err?.status ?? null,
+          error: String(err?.message || err),
+        });
+      }
+    }
+
     if (successful.length === 0) throw lastErr;
 
     const mergedBugs = [];
@@ -629,7 +1098,7 @@ export function createZenTaoClient(config) {
     }, null);
 
     return {
-      total: mergedBugs.length,
+      total: mergedFiltered.length,
       matched: mergedFiltered.length,
       page: safePage,
       limit: safeLimit,
@@ -641,6 +1110,7 @@ export function createZenTaoClient(config) {
         status: best?.status ?? null,
         path: best?.path ?? primaryPath,
         triedPaths,
+        scannedTotal: mergedBugs.length,
         paths: successful.map((r) => ({
           path: r.path,
           status: r.status,
@@ -652,13 +1122,13 @@ export function createZenTaoClient(config) {
     };
   }
 
-  async function getBugDetail({ id, path = "/bugs/{id}" } = {}) {
+  async function getBugDetail({ id } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("getBugDetail requires a valid bug id");
     }
 
-    const detailPath = buildBugDetailPath({ id: bugId, path });
+    const detailPath = buildBugDetailPath({ id: bugId });
     const resp = await call({ path: detailPath, method: "GET" });
     const bug = parseBugDetailFromResponse(resp.data);
     if (!bug) {
@@ -666,14 +1136,14 @@ export function createZenTaoClient(config) {
         id: bugId,
         found: false,
         images: [],
-        raw: { status: resp.status, data: resp.data },
+        raw: { status: resp.status },
       };
     }
 
     return {
       id: bugId,
       found: true,
-      bug,
+      bug: buildSafeBugDetail(bug),
       images: extractImageUrlsFromBug(bug),
       raw: { status: resp.status },
     };
@@ -684,14 +1154,13 @@ export function createZenTaoClient(config) {
     resolution = "fixed",
     solution = "",
     comment = "",
-    path = "/bugs/{id}/resolve",
   } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("resolveBug requires a valid bug id");
     }
 
-    const resolvePath = buildBugResolvePath({ id: bugId, path });
+    const resolvePath = buildBugResolvePath({ id: bugId });
     const resolvedValue = String(resolution || "fixed");
     const resolvedComment = buildResolutionComment({ solution, comment, resolution: resolvedValue });
     const body = {
@@ -706,17 +1175,17 @@ export function createZenTaoClient(config) {
       resolution: resolvedValue,
       solution: String(solution || "").trim(),
       comment: resolvedComment,
-      raw: { status: resp.status, data: resp.data },
+      raw: { status: resp.status },
     };
   }
 
-  async function closeBug({ id, comment = "", path = "/bugs/{id}/close" } = {}) {
+  async function closeBug({ id, comment = "" } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("closeBug requires a valid bug id");
     }
 
-    const closePath = buildBugTransitionPath({ id: bugId, path, action: "close" });
+    const closePath = buildBugTransitionPath({ id: bugId, action: "close" });
     const body = {};
     if (comment) body.comment = String(comment);
 
@@ -724,17 +1193,17 @@ export function createZenTaoClient(config) {
     return {
       id: bugId,
       closed: true,
-      raw: { status: resp.status, data: resp.data },
+      raw: { status: resp.status },
     };
   }
 
-  async function activateBug({ id, comment = "", path = "/bugs/{id}/activate" } = {}) {
+  async function activateBug({ id, comment = "" } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("activateBug requires a valid bug id");
     }
 
-    const activatePath = buildBugTransitionPath({ id: bugId, path, action: "activate" });
+    const activatePath = buildBugTransitionPath({ id: bugId, action: "activate" });
     const body = {};
     if (comment) body.comment = String(comment);
 
@@ -742,7 +1211,7 @@ export function createZenTaoClient(config) {
     return {
       id: bugId,
       activated: true,
-      raw: { status: resp.status, data: resp.data },
+      raw: { status: resp.status },
     };
   }
 
@@ -750,8 +1219,6 @@ export function createZenTaoClient(config) {
     id,
     result = "pass",
     comment = "",
-    closePath = "/bugs/{id}/close",
-    activatePath = "/bugs/{id}/activate",
   } = {}) {
     const normalizedResult = normalizeString(result || "pass");
     if (normalizedResult !== "pass" && normalizedResult !== "fail") {
@@ -759,7 +1226,7 @@ export function createZenTaoClient(config) {
     }
 
     if (normalizedResult === "pass") {
-      const closeResult = await closeBug({ id, comment, path: closePath });
+      const closeResult = await closeBug({ id, comment });
       return {
         id: Number(id),
         verified: true,
@@ -769,7 +1236,7 @@ export function createZenTaoClient(config) {
       };
     }
 
-    const activateResult = await activateBug({ id, comment, path: activatePath });
+    const activateResult = await activateBug({ id, comment });
     return {
       id: Number(id),
       verified: true,
@@ -779,7 +1246,7 @@ export function createZenTaoClient(config) {
     };
   }
 
-  async function commentBug({ id, comment, path = "/bugs/{id}/comment" } = {}) {
+  async function commentBug({ id, comment } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("commentBug requires a valid bug id");
@@ -789,7 +1256,7 @@ export function createZenTaoClient(config) {
       throw new Error("commentBug requires non-empty comment");
     }
 
-    const primaryPath = buildBugCommentPath({ id: bugId, path });
+    const primaryPath = buildBugCommentPath({ id: bugId });
     const body = { comment: text };
     try {
       const resp = await call({ path: primaryPath, method: "POST", body });
@@ -797,7 +1264,7 @@ export function createZenTaoClient(config) {
         id: bugId,
         commented: true,
         comment: text,
-        raw: { status: resp.status, path: primaryPath, data: resp.data },
+        raw: { status: resp.status, path: primaryPath },
       };
     } catch (err) {
       const fallbackPath = primaryPath.replace(/\/comment$/, "/comments");
@@ -807,7 +1274,7 @@ export function createZenTaoClient(config) {
           id: bugId,
           commented: true,
           comment: text,
-          raw: { status: resp.status, path: fallbackPath, data: resp.data },
+          raw: { status: resp.status, path: fallbackPath },
         };
       }
       throw err;
@@ -821,16 +1288,14 @@ export function createZenTaoClient(config) {
     page = 1,
     productId,
     projectSetId,
-    maxItems = 50,
-    assignedTo = "",
+    maxItems = 20,
     resolution = "fixed",
     solution = "",
     comment = "",
-    listPath = "/bugs",
-    resolvePath = "/bugs/{id}/resolve",
-    stopOnError = false,
+    path = "/bugs",
+    stopOnError = true,
   } = {}) {
-    const safeMaxItems = Math.max(1, Math.min(Number(maxItems) || 50, 500));
+    const safeMaxItems = Math.max(1, Math.min(Number(maxItems) || 20, MAX_BATCH_RESOLVE_ITEMS));
     const listResult = await getMyBugs({
       status,
       keyword,
@@ -838,8 +1303,7 @@ export function createZenTaoClient(config) {
       page,
       productId,
       projectSetId,
-      path: listPath,
-      assignedTo,
+      path,
     });
 
     const candidates = (listResult.bugs || []).slice(0, safeMaxItems);
@@ -859,7 +1323,6 @@ export function createZenTaoClient(config) {
           resolution,
           solution,
           comment,
-          path: resolvePath,
         });
         success.push({ id: bugId, status: result.raw.status });
       } catch (err) {

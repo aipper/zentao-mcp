@@ -15,6 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf8"));
 
 const DEBUG = process.env.ZENTAO_DEBUG === "true";
+const ALLOW_INSECURE_HTTP = String(process.env.ZENTAO_ALLOW_INSECURE_HTTP || "false").toLowerCase() === "true";
 
 function log(...args) {
   if (DEBUG) {
@@ -22,9 +23,26 @@ function log(...args) {
   }
 }
 
+function sanitizeToolArgs(toolName, args) {
+  if (!args || typeof args !== "object") return {};
+  const redactedKeys = new Set(["body", "query", "comment", "solution", "password", "token"]);
+  const sanitized = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (redactedKeys.has(key)) {
+      sanitized[key] = "<redacted>";
+      continue;
+    }
+    if (toolName === "get_token" && key === "force") {
+      sanitized[key] = Boolean(value);
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
+}
+
 const KNOWN_TOOL_NAMES = new Set([
   "get_token",
-  "call",
   "list_my_projects",
   "get_my_bugs",
   "get_bug_detail",
@@ -37,29 +55,20 @@ const KNOWN_TOOL_NAMES = new Set([
 
 function normalizeToolName(rawName) {
   if (!rawName || typeof rawName !== "string") return rawName;
-  if (KNOWN_TOOL_NAMES.has(rawName)) return rawName;
-
-  if (rawName.includes("_")) {
-    const withoutPrefix = rawName.replace(/^[^_]+_/, "");
-    if (KNOWN_TOOL_NAMES.has(withoutPrefix)) return withoutPrefix;
-  }
-
-  for (const name of KNOWN_TOOL_NAMES) {
-    if (rawName.endsWith(name)) return name;
-  }
-  return rawName;
+  return KNOWN_TOOL_NAMES.has(rawName) ? rawName : rawName;
 }
 
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required env: ${name}`);
 
-  // Security check: warn if using HTTP instead of HTTPS
   if (name === "ZENTAO_BASE_URL" && value.startsWith("http://")) {
-    process.stderr.write(
-      "⚠️  WARNING: Using HTTP instead of HTTPS is insecure! " +
-      "Your credentials and data will be transmitted in plain text.\n"
-    );
+    if (!ALLOW_INSECURE_HTTP) {
+      throw new Error("ZENTAO_BASE_URL must use HTTPS unless ZENTAO_ALLOW_INSECURE_HTTP=true");
+    }
+  }
+  if (name === "ZENTAO_BASE_URL" && !/^https?:\/\//i.test(value)) {
+    throw new Error("ZENTAO_BASE_URL must start with http:// or https://");
   }
 
   return value;
@@ -71,7 +80,6 @@ function getConfigFromEnv() {
   const tokenPath = process.env.ZENTAO_TOKEN_PATH || `${apiPrefix}/tokens`;
   const tokenTtlMs = Number(process.env.ZENTAO_TOKEN_TTL_MS || "3000000");
   const timeoutMs = Number(process.env.ZENTAO_HTTP_TIMEOUT_MS || "30000");
-  const exposeToken = String(process.env.ZENTAO_EXPOSE_TOKEN || "false").toLowerCase() === "true";
   const defaultProductId = Number(process.env.ZENTAO_PRODUCT_ID || "0") || null;
   const defaultProjectSetId = Number(process.env.ZENTAO_PROJECT_SET_ID || "0") || null;
   const myBugsPath = String(process.env.ZENTAO_MY_BUGS_PATH || "").trim();
@@ -93,7 +101,7 @@ function getConfigFromEnv() {
     tokenPath,
     tokenTtlMs,
     timeoutMs,
-    exposeToken,
+    allowInsecureHttp: ALLOW_INSECURE_HTTP,
     defaultProductId,
     defaultProjectSetId,
     myBugsPath,
@@ -107,13 +115,7 @@ async function main() {
   log("Starting zentao-mcp-server version", pkg.version);
 
   const config = getConfigFromEnv();
-  log("Config loaded:", {
-    baseUrl: config.baseUrl,
-    apiPrefix: config.apiPrefix,
-    account: config.auth.account,
-    productId: config.defaultProductId,
-    projectSetId: config.defaultProjectSetId,
-  });
+  log("Config loaded");
 
   const zentao = createZenTaoClient(config);
 
@@ -133,7 +135,7 @@ async function main() {
     const toolName = normalizeToolName(rawToolName);
     const args = req.params?.arguments || {};
 
-    log(`Tool call: ${toolName}`, JSON.stringify(args));
+    log(`Tool call: ${toolName}`, JSON.stringify(sanitizeToolArgs(toolName, args)));
 
     try {
       assertToolArgs(toolName, args);
@@ -141,19 +143,11 @@ async function main() {
       if (toolName === "get_token") {
         const force = Boolean(args.force);
         const result = await zentao.getToken({ force });
-        const output = config.exposeToken
-          ? result
-          : {
-              ...result,
-              token: result.token ? `${result.token.slice(0, 6)}…${result.token.slice(-4)}` : "",
-            };
+        const output = {
+          ...result,
+          token: result.token ? `${result.token.slice(0, 6)}…${result.token.slice(-4)}` : "",
+        };
         return toMcpTextResult(JSON.stringify(output, null, 2));
-      }
-
-      if (toolName === "call") {
-        const { path, method, query, body } = args;
-        const resp = await zentao.call({ path, method, query, body });
-        return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
 
       if (toolName === "list_my_projects") {
@@ -170,7 +164,6 @@ async function main() {
           productId: args.productId,
           projectSetId: args.projectSetId,
           path: args.path || "/bugs",
-          assignedTo: args.assignedTo || "",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -178,7 +171,6 @@ async function main() {
       if (toolName === "get_bug_detail") {
         const resp = await zentao.getBugDetail({
           id: args.id,
-          path: args.path || "/bugs/{id}",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -189,7 +181,6 @@ async function main() {
           resolution: args.resolution || "fixed",
           solution: args.solution || "",
           comment: args.comment || "",
-          path: args.path || "/bugs/{id}/resolve",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -203,13 +194,11 @@ async function main() {
           productId: args.productId,
           projectSetId: args.projectSetId,
           maxItems: args.maxItems,
-          assignedTo: args.assignedTo || "",
           resolution: args.resolution || "fixed",
           solution: args.solution || "",
           comment: args.comment || "",
-          listPath: args.listPath || "/bugs",
-          resolvePath: args.resolvePath || "/bugs/{id}/resolve",
-          stopOnError: Boolean(args.stopOnError),
+          path: args.path || "/bugs",
+          stopOnError: args.stopOnError !== undefined ? Boolean(args.stopOnError) : true,
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -218,7 +207,6 @@ async function main() {
         const resp = await zentao.closeBug({
           id: args.id,
           comment: args.comment || "",
-          path: args.path || "/bugs/{id}/close",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -228,8 +216,6 @@ async function main() {
           id: args.id,
           result: args.result || "pass",
           comment: args.comment || "",
-          closePath: args.closePath || "/bugs/{id}/close",
-          activatePath: args.activatePath || "/bugs/{id}/activate",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -238,7 +224,6 @@ async function main() {
         const resp = await zentao.commentBug({
           id: args.id,
           comment: args.comment || "",
-          path: args.path || "/bugs/{id}/comment",
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
@@ -252,9 +237,8 @@ async function main() {
         tool: rawToolName,
         message: String(err?.message || err),
         status: err?.status ?? null,
-        data: err?.data ?? null,
         hint: "If you see 'Need product id', set env ZENTAO_PRODUCT_ID or pass productId in get_my_bugs.",
-        hint2: "For project-set instances, set ZENTAO_PROJECT_SET_ID or ZENTAO_MY_BUGS_PATH.",
+        hint2: "For project-set instances, prefer get_my_bugs with projectSetId or ZENTAO_MY_BUGS_PATH=/my/bug; list_my_projects may miss project sets without concrete projects.",
       };
       return toMcpTextResult(JSON.stringify(errorPayload, null, 2), { isError: true });
     }

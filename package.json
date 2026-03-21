@@ -3,12 +3,21 @@
   "version": "0.1.10",
   "private": false,
   "type": "module",
-  "description": "A minimal MCP server for ZenTao (token + generic REST call + a few helper tools).",
+  "description": "A minimal MCP server for ZenTao (token + focused bug workflow tools).",
   "license": "MIT",
   "main": "src/index.js",
   "bin": {
     "zentao-mcp-server": "bin/zentao-mcp-server.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/smoke.mjs",
+    ".env.example",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },

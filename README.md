@@ -2,11 +2,12 @@
 
 ## 目标
 - 提供一个可运行的 MCP Server（stdio），连接你的禅道 RESTful API v1。
-- 最小功能：自动获取/缓存 Token + 通用 `call` 工具 + 少量便捷工具示例。
+- 最小功能：自动获取/缓存 Token + 常用 bug 工具。
 
 ## 非目标
 - 不在仓库内存任何密钥/Token。
-- 不保证覆盖你禅道的全部 API；优先把“通用 call”跑通，再按你的流程补工具。
+- 不暴露无边界的通用 REST 写接口。
+- 不保证覆盖你禅道的全部 API；优先支持高频 bug 流程，再按你的流程补工具。
 
 ## 依赖
 - Node.js 18+（需要内置 `fetch`）
@@ -28,6 +29,8 @@ MIT - 详见 [LICENSE](./LICENSE) 文件
 > 注意：不同禅道版本/部署方式的 token 端点与返回结构可能不同；可通过 `ZENTAO_TOKEN_PATH`/`ZENTAO_API_PREFIX` 调整。
 >
 > 默认情况下不需要配置 `ZENTAO_API_PREFIX`（默认值是 `/api.php/v1`）。
+>
+> 安全约束：`ZENTAO_API_PREFIX` / `ZENTAO_TOKEN_PATH` 只支持相对路径；默认要求 `ZENTAO_BASE_URL` 使用 HTTPS。`ZENTAO_BASE_URL` 可为根路径或子目录部署地址（如 `https://zentao.example.com/zentao`）。
 
 ## 安装与运行
 ```bash
@@ -94,42 +97,51 @@ npm run smoke
 ## 常见错误（`-32000`）
 `-32000` 通常是客户端侧“通用 MCP 调用失败”映射码，优先检查：
 - `env` 是否完整传入（尤其是 `ZENTAO_BASE_URL`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`）。
+- 默认要求 HTTPS；如果你的实例只能走 HTTP，必须显式设置 `ZENTAO_ALLOW_INSECURE_HTTP=true`，且只建议临时内网调试使用。
 - 若报 `Need product id`，请设置 `ZENTAO_PRODUCT_ID`，或在 `get_my_bugs` 传 `productId`。
 - 若你的 bug 在“项目集/我的视角”而非产品，建议设置 `ZENTAO_PROJECT_SET_ID`，并配置 `ZENTAO_MY_BUGS_PATH=/my/bug`。
+- 项目集场景下，优先直接调用 `get_my_bugs` 并传 `projectSetId`，必要时再显式传 `path="/my/bug"`；不要先依赖 `list_my_projects` 找项目。
+- 有些项目集本身没有创建实际项目，但仍然存在“我的 bug”；这类数据可能不会出现在 `list_my_projects` 结果里。
 - `get_my_bugs` 会按候选路径回退（包含项目集路径）；即使首个路径返回空列表也会继续尝试，并会把多端点结果合并去重。
+- `get_my_bugs.total` 表示最终“我的 bug”总数；若需排查底层一共扫描了多少条，可看 `raw.scannedTotal`。
 - 排查时看工具返回里的 `raw.triedPaths` / `raw.paths`，可确认每条路径的返回码与命中数量。
-- `ZENTAO_API_PREFIX`/`ZENTAO_TOKEN_PATH` 是否和你的禅道实例一致。
+- `ZENTAO_API_PREFIX`/`ZENTAO_TOKEN_PATH` 是否和你的禅道实例一致，且使用相对路径。
 - MCP 客户端是否真的在执行 `npx -y @aipper/zentao-mcp-server`（而不是旧的本地命令）。
 - 客户端日志中是否有启动报错（如找不到命令、401、超时）。
 
 ## 已实现工具
-- `get_token`：获取/刷新 token（默认不回显完整 token）
-- `call`：调用任意相对 API 路径（自动带 Token 头）
-- `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调）
-- `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`/`projectSetId`，默认路径 `/bugs`）
-- `get_bug_detail`：按 `id` 获取 bug 详情（默认路径模板 `/bugs/{id}`，返回详情与图片链接；会提取富文本 `<img>`、Markdown 图片、附件图片并归一化为可访问 URL）
+- `get_token`：获取/刷新 token（始终只回显脱敏后的 token 摘要）
+- `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调；不适合作为项目集 bug 的唯一发现入口）
+- `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`/`projectSetId`，默认路径 `/bugs`；`path` 仅允许 `/bugs`、`/my/bug`、`/my/bugs`）
+- `get_bug_detail`：按 `id` 获取 bug 详情（固定读取 `/bugs/{id}`；返回安全裁剪后的 bug 摘要与同源图片链接，不直接透传外部图片地址或原始附件外链）
 - `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`，支持 `solution` 解决说明）
-- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`/`projectSetId`）
+- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`/`projectSetId`，默认遇错即停，`maxItems` 上限 100）
 - `close_bug`：按 `id` 关闭 bug
 - `verify_bug`：验证结果处理（`pass`=关闭，`fail`=激活）
-- `comment_bug`：按 `id` 添加备注（默认路径 `/bugs/{id}/comment`）
+- `comment_bug`：按 `id` 添加备注
 
 示例参数：
-- `resolve_bug`：`{"id":123,"resolution":"fixed","comment":"已修复并自测"}`
-- `resolve_bug`（建议）：`{"id":123,"resolution":"fixed","solution":"修复空指针并补充参数校验"}`
-- `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"批量修复"}`
-- `batch_resolve_my_bugs`（建议）：`{"status":"active","maxItems":20,"solution":"统一修复分页参数为空导致的报错"}`
-- `get_my_bugs`（按产品）：`{"status":"active","productId":1,"limit":50}`
+- `resolve_bug`：`{"id":123,"resolution":"fixed","comment":"根因已定位，已按最新字段映射调整处理逻辑"}`
+- `resolve_bug`（建议）：`{"id":123,"resolution":"fixed","solution":"补齐分页参数为空时的默认值分支，避免空值继续进入查询构造；同时收敛异常提示，防止前端重复触发提交"}`
+- `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"统一补充非空校验并收敛异常分支"}`
+- `batch_resolve_my_bugs`（建议）：`{"status":"active","maxItems":20,"solution":"统一修正状态切换时的判空与分支顺序，避免旧数据触发空指针；保存前增加兜底校验，异常场景改为明确提示"}`
 - `get_my_bugs`（项目集）：`{"status":"active","projectSetId":1001,"limit":50}`
 - `get_my_bugs`（我的）：`{"status":"active","path":"/my/bug","limit":50}`
+- `get_my_bugs`（项目集 + 我的）：`{"status":"active","projectSetId":1001,"path":"/my/bug","limit":50}`
+- `get_my_bugs`（按产品）：`{"status":"active","productId":1,"limit":50}`
 - `close_bug`：`{"id":123,"comment":"验证通过，关闭"}`
 - `verify_bug`：`{"id":123,"result":"pass","comment":"验证通过"}`
 - `comment_bug`：`{"id":123,"comment":"已复现，正在定位根因"}`
 
+`solution` / `comment` 建议直接写“根因 + 修复思路 + 改动逻辑 + 影响范围”，不要默认写 `Evidence:`、`Verify:`、文件路径、编译命令或“已修复并自测”这类无法说明改动内容的表述。
+
+使用建议：如果用户提到“项目集”“我的 bug”“项目列表里找不到但禅道里能看到 bug”，优先走项目集视角的 `get_my_bugs`，不要先让用户证明项目已创建。
+
 ## 安全建议
-- **强烈建议使用 HTTPS**：HTTP 会明文传输账号密码和数据，存在安全风险。
+- **默认要求使用 HTTPS**：HTTP 会明文传输账号密码和数据，存在安全风险；如确需兼容老旧实例，需显式设置 `ZENTAO_ALLOW_INSECURE_HTTP=true`。
 - 使用最小权限账号（仅需要的项目权限），避免使用管理员账号。
-- 默认 `get_token` 不回显完整 token；如确需调试，可设 `ZENTAO_EXPOSE_TOKEN=true`。
+- `get_token` 不再支持回显完整 token。
+- 调试日志会自动脱敏 `query`、`body`、`comment`、`solution` 等敏感字段，但仍建议仅在排查问题时临时开启。
 
 ## 调试
 如需查看详细日志，可设置环境变量：
