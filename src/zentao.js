@@ -95,6 +95,7 @@ function createAbortSignal(timeoutMs) {
  * @param {number} config.timeoutMs - Request timeout in milliseconds
  * @param {number} [config.defaultProductId] - Default product ID
  * @param {number} [config.defaultProjectSetId] - Default project set ID
+ * @param {number} [config.defaultProjectId] - Default project ID
  * @param {string} [config.myBugsPath] - My bugs path
  * @param {string[]} [config.bugsFallbackPaths] - Bug fallback paths
  * @param {string[]} [config.projectSetBugsPaths] - Project set bug paths
@@ -113,6 +114,7 @@ export function createZenTaoClient(config) {
     allowInsecureHttp,
     defaultProductId,
     defaultProjectSetId,
+    defaultProjectId,
     myBugsPath,
     bugsFallbackPaths,
     projectSetBugsPaths,
@@ -748,6 +750,7 @@ export function createZenTaoClient(config) {
     limit = 20,
     page = 1,
     productId,
+    projectId,
     projectSetId,
     path = "/bugs",
   } = {}) {
@@ -755,6 +758,41 @@ export function createZenTaoClient(config) {
     const safePage = Math.max(1, Number(page) || 1);
     const dashboardScanLimit = Math.max(safeLimit, 100);
     const assignee = normalizeString(auth.account);
+    const effectiveProjectId = normalizePositiveInt(projectId) || normalizePositiveInt(defaultProjectId);
+
+    if (effectiveProjectId) {
+      const query = { limit: safeLimit, page: safePage, assignedTo: assignee, status: status || undefined };
+      try {
+        const resp = await call({ path: `/projects/${effectiveProjectId}/bugs`, method: "GET", query });
+        const bugs = parseBugsFromResponse(resp?.data);
+        const filtered = bugs.filter((bug) => matchesBugFilters(bug, { status, keyword, assignee }));
+        return {
+          total: filtered.length,
+          matched: filtered.length,
+          page: safePage,
+          limit: safeLimit,
+          projectId: effectiveProjectId,
+          assignedTo: assignee,
+          bugs: filtered,
+          raw: {
+            status: resp?.status ?? null,
+            path: `/projects/${effectiveProjectId}/bugs`,
+            triedPaths: [{
+              path: `/projects/${effectiveProjectId}/bugs`,
+              status: resp?.status ?? null,
+              total: bugs.length,
+              matched: filtered.length,
+            }],
+            scannedTotal: bugs.length,
+            paths: [{ path: `/projects/${effectiveProjectId}/bugs`, status: resp?.status ?? null, total: bugs.length, matched: filtered.length }],
+            merged: false,
+          },
+        };
+      } catch (err) {
+        throw err;
+      }
+    }
+
     const effectiveProductId = normalizePositiveInt(productId) || normalizePositiveInt(defaultProductId);
     const effectiveProjectSetId = normalizePositiveInt(projectSetId) || normalizePositiveInt(defaultProjectSetId);
     const requestedPath = normalizeBugsListPath(path);
@@ -1287,6 +1325,7 @@ export function createZenTaoClient(config) {
     limit = 50,
     page = 1,
     productId,
+    projectId,
     projectSetId,
     maxItems = 20,
     resolution = "fixed",
@@ -1302,6 +1341,7 @@ export function createZenTaoClient(config) {
       limit,
       page,
       productId,
+      projectId,
       projectSetId,
       path,
     });

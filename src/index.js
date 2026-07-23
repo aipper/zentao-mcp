@@ -82,6 +82,7 @@ function getConfigFromEnv() {
   const timeoutMs = Number(process.env.ZENTAO_HTTP_TIMEOUT_MS || "30000");
   const defaultProductId = Number(process.env.ZENTAO_PRODUCT_ID || "0") || null;
   const defaultProjectSetId = Number(process.env.ZENTAO_PROJECT_SET_ID || "0") || null;
+  const defaultProjectId = Number(process.env.ZENTAO_PROJECT_ID || "0") || null;
   const myBugsPath = String(process.env.ZENTAO_MY_BUGS_PATH || "").trim();
   const bugsFallbackPaths = String(process.env.ZENTAO_BUGS_FALLBACK_PATHS || "")
     .split(",")
@@ -104,6 +105,7 @@ function getConfigFromEnv() {
     allowInsecureHttp: ALLOW_INSECURE_HTTP,
     defaultProductId,
     defaultProjectSetId,
+    defaultProjectId,
     myBugsPath,
     bugsFallbackPaths,
     projectSetBugsPaths,
@@ -162,6 +164,7 @@ async function main() {
           limit: args.limit,
           page: args.page,
           productId: args.productId,
+          projectId: args.projectId,
           projectSetId: args.projectSetId,
           path: args.path || "/bugs",
         });
@@ -192,6 +195,7 @@ async function main() {
           limit: args.limit,
           page: args.page,
           productId: args.productId,
+          projectId: args.projectId,
           projectSetId: args.projectSetId,
           maxItems: args.maxItems,
           resolution: args.resolution || "fixed",
@@ -236,9 +240,9 @@ async function main() {
         ok: false,
         tool: rawToolName,
         message: String(err?.message || err),
-        status: err?.status ?? null,
-        hint: "If you see 'Need product id', set env ZENTAO_PRODUCT_ID or pass productId in get_my_bugs.",
-        hint2: "For project-set instances, prefer get_my_bugs with projectSetId or ZENTAO_MY_BUGS_PATH=/my/bug; list_my_projects may miss project sets without concrete projects.",
+          status: err?.status ?? null,
+          hint: "If you see 'Need product id', set env ZENTAO_PRODUCT_ID or pass productId in get_my_bugs. For project-scoped bugs, set ZENTAO_PROJECT_ID or pass projectId.",
+          hint2: "For project-set instances, prefer get_my_bugs with projectSetId or ZENTAO_MY_BUGS_PATH=/my/bug; list_my_projects may miss project sets without concrete projects.",
       };
       return toMcpTextResult(JSON.stringify(errorPayload, null, 2), { isError: true });
     }

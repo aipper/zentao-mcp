@@ -41,6 +41,11 @@ export const TOOLS = [
         limit: { type: "number", minimum: 1, maximum: 200, description: "Default 20, max 200" },
         page: { type: "number", minimum: 1, description: "Default 1" },
         productId: { type: "number", minimum: 1, description: "Optional product id (for instances requiring product scope)" },
+        projectId: {
+          type: "number",
+          minimum: 1,
+          description: "Optional project id. Directly query /projects/{id}/bugs, no cross-project merge.",
+        },
         projectSetId: {
           type: "number",
           minimum: 1,
@@ -100,6 +105,11 @@ export const TOOLS = [
         limit: { type: "number", minimum: 1, maximum: 200, description: "List page size, default 50" },
         page: { type: "number", minimum: 1, description: "Default 1" },
         productId: { type: "number", minimum: 1, description: "Optional product id (for instances requiring product scope)" },
+        projectId: {
+          type: "number",
+          minimum: 1,
+          description: "Optional project id. Directly query /projects/{id}/bugs, no cross-project merge.",
+        },
         projectSetId: {
           type: "number",
           minimum: 1,
@@ -196,6 +206,9 @@ export function assertToolArgs(name, args) {
     if (args.projectSetId !== undefined && (!Number.isFinite(args.projectSetId) || args.projectSetId < 1)) {
       throw new Error("get_my_bugs.projectSetId must be a number >= 1");
     }
+    if (args.projectId !== undefined && (!Number.isFinite(args.projectId) || args.projectId < 1)) {
+      throw new Error("get_my_bugs.projectId must be a number >= 1");
+    }
   }
   if (name === "get_bug_detail") {
     if (!Number.isFinite(args.id) || Number(args.id) < 1) {
@@ -231,6 +244,9 @@ export function assertToolArgs(name, args) {
     }
     if (args.projectSetId !== undefined && (!Number.isFinite(args.projectSetId) || args.projectSetId < 1)) {
       throw new Error("batch_resolve_my_bugs.projectSetId must be a number >= 1");
+    }
+    if (args.projectId !== undefined && (!Number.isFinite(args.projectId) || args.projectId < 1)) {
+      throw new Error("batch_resolve_my_bugs.projectId must be a number >= 1");
     }
     if (args.path !== undefined) {
       if (typeof args.path !== "string") throw new Error("batch_resolve_my_bugs.path must be a string");

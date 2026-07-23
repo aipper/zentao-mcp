@@ -18,7 +18,8 @@
 - 不要把聊天里的通用收尾模板直接复制到 ZenTao 的 `solution` 或 `comment` 字段。
 
 ## 工具约定
-- 获取 bug 时，若已知是在项目集视角，优先使用 `get_my_bugs` 并传 `projectSetId`，必要时配合 `path="/my/bug"` 或环境变量 `ZENTAO_MY_BUGS_PATH=/my/bug`。
+- 获取 bug 时，优先使用 `get_my_bugs`。若已知是在项目视角，传 `projectId`（比 `projectSetId` 更精确，不会跨项目合并）；若已知是产品视角传 `productId`；若已知是项目集视角传 `projectSetId`，必要时配合 `path="/my/bug"` 或环境变量 `ZENTAO_MY_BUGS_PATH=/my/bug`。
+- `get_my_bugs` 传了 `projectId` 后会直接查 `/projects/{id}/bugs`，不再扫描其它项目/产品/项目集路径，实现硬隔离。
 - 不要默认先依赖 `list_my_projects` 找项目再查 bug；有些项目集没有实际创建项目，也仍然会有“我的 bug”，这类场景可能无法通过项目列表发现。
 - 处理 bug 优先填 `solution`，只有没有合适解决说明时才退回 `comment`。
 - `comment_bug.comment` 用于补充进展、风险、待验证项，不替代完整的解决说明。
