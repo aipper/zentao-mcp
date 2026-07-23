@@ -517,7 +517,9 @@ export function createZenTaoClient(config) {
         : cleaned.startsWith("//")
           ? new URL(`${baseProtocol}${cleaned}`)
           : cleaned.startsWith("/")
-            ? resolveAgainstDeploymentPath(cleaned)
+            ? (cleaned.includes("?") || cleaned.includes("#"))
+              ? new URL(cleaned.replace(/^\//, ""), deploymentBaseUrl)
+              : resolveAgainstDeploymentPath(cleaned)
             : resolveAgainstDeploymentPath(`/${cleaned.replace(/^\.?\//, "")}`);
       if (candidate.origin !== baseOrigin) return "";
       return candidate.toString();
