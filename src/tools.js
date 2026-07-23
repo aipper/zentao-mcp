@@ -1,3 +1,5 @@
+import { assertSolutionArgs } from "./solution.js";
+
 export function toMcpTextResult(text, options = {}) {
   const { isError = false } = options;
   return {
@@ -9,6 +11,38 @@ export function toMcpTextResult(text, options = {}) {
 }
 
 const SAFE_BUG_LIST_PATHS = new Set(["/bugs", "/my/bug", "/my/bugs"]);
+
+/** Shared MCP schema for structured bug solutions. */
+const SOLUTION_MODULES_SCHEMA = {
+  type: "object",
+  description:
+    "Preferred structured solution. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. Prefer this over plain solution. Avoid Evidence/Verify labels, file paths, and compile/test commands.",
+  properties: {
+    rootCause: {
+      type: "string",
+      description: "【根因】Why it broke: trigger condition + wrong behavior.",
+    },
+    fixApproach: {
+      type: "string",
+      description: "【修复思路】How to fix: strategy without low-level proof noise.",
+    },
+    logicChange: {
+      type: "string",
+      description: "【改动逻辑】Key branch/validation/flow changes (before → after or bullet points).",
+    },
+    impact: {
+      type: "string",
+      description: "【影响范围】Affected pages/APIs/scenarios and result-oriented regression notes.",
+    },
+  },
+  additionalProperties: false,
+};
+
+const PLAIN_SOLUTION_SCHEMA = {
+  type: "string",
+  description:
+    "Legacy free-text solution. Prefer solutionModules. If both are set, solutionModules wins when it has any non-empty field.",
+};
 
 export const TOOLS = [
   {
@@ -73,17 +107,15 @@ export const TOOLS = [
   },
   {
     name: "resolve_bug",
-    description: "Resolve one bug by ID (default resolution=fixed). Prefer a solution that explains root cause, fix approach, and logic changes.",
+    description:
+      "Resolve one bug by ID (default resolution=fixed). Prefer solutionModules {rootCause, fixApproach, logicChange, impact}; plain solution remains supported for compatibility.",
     inputSchema: {
       type: "object",
       properties: {
         id: { type: "number", minimum: 1, description: "Bug ID" },
         resolution: { type: "string", description: "Default fixed" },
-        solution: {
-          type: "string",
-          description:
-            "Preferred. Describe the fix idea, changed logic, and affected behavior. Avoid Evidence/Verify labels, file paths, and compile/test commands.",
-        },
+        solutionModules: SOLUTION_MODULES_SCHEMA,
+        solution: PLAIN_SOLUTION_SCHEMA,
         comment: {
           type: "string",
           description: "Optional resolve comment. If used for bug updates, prefer change summary over build/test proof.",
@@ -96,7 +128,7 @@ export const TOOLS = [
   {
     name: "batch_resolve_my_bugs",
     description:
-      "Batch resolve my bugs (default status=active, resolution=fixed). Prefer projectSetId or /my/bug for project-set scope, and use a shared solution that explains the common root cause and logic changes.",
+      "Batch resolve my bugs (default status=active, resolution=fixed). Prefer projectSetId or /my/bug for project-set scope, and pass shared solutionModules {rootCause, fixApproach, logicChange, impact}.",
     inputSchema: {
       type: "object",
       properties: {
@@ -117,11 +149,12 @@ export const TOOLS = [
         },
         maxItems: { type: "number", minimum: 1, maximum: 100, description: "Max resolve count, default 20" },
         resolution: { type: "string", description: "Default fixed" },
-        solution: {
-          type: "string",
+        solutionModules: {
+          ...SOLUTION_MODULES_SCHEMA,
           description:
-            "Preferred. Summarize the shared fix approach and changed logic. Avoid Evidence/Verify labels, file paths, and compile/test commands.",
+            "Preferred shared structured solution for the batch. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. Write common root cause and shared logic changes.",
         },
+        solution: PLAIN_SOLUTION_SCHEMA,
         comment: {
           type: "string",
           description: "Optional resolve comment. Prefer business-facing change summary over proof-style output.",
@@ -225,9 +258,7 @@ export function assertToolArgs(name, args) {
     if (args.path !== undefined) {
       throw new Error("resolve_bug.path is no longer supported");
     }
-    if (args.solution !== undefined && typeof args.solution !== "string") {
-      throw new Error("resolve_bug.solution must be a string");
-    }
+    assertSolutionArgs("resolve_bug", args);
   }
   if (name === "batch_resolve_my_bugs") {
     if (args.limit !== undefined && (!Number.isFinite(args.limit) || args.limit < 1 || args.limit > 200)) {
@@ -260,9 +291,7 @@ export function assertToolArgs(name, args) {
     if (args.listPath !== undefined || args.resolvePath !== undefined) {
       throw new Error("batch_resolve_my_bugs endpoint overrides are no longer supported");
     }
-    if (args.solution !== undefined && typeof args.solution !== "string") {
-      throw new Error("batch_resolve_my_bugs.solution must be a string");
-    }
+    assertSolutionArgs("batch_resolve_my_bugs", args);
   }
   if (name === "close_bug") {
     if (!Number.isFinite(args.id) || Number(args.id) < 1) {

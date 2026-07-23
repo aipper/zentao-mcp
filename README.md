@@ -114,17 +114,66 @@ npm run smoke
 - `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调；不适合作为项目集 bug 的唯一发现入口）
 - `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`/`projectSetId`，默认路径 `/bugs`；`path` 仅允许 `/bugs`、`/my/bug`、`/my/bugs`）
 - `get_bug_detail`：按 `id` 获取 bug 详情（固定读取 `/bugs/{id}`；返回安全裁剪后的 bug 摘要与同源图片链接，不直接透传外部图片地址或原始附件外链）
-- `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`，支持 `solution` 解决说明）
-- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`/`projectSetId`，默认遇错即停，`maxItems` 上限 100）
+- `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`；优先 `solutionModules`，兼容纯文本 `solution`）
+- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`/`projectSetId`，默认遇错即停，`maxItems` 上限 100；优先共享 `solutionModules`）
 - `close_bug`：按 `id` 关闭 bug
 - `verify_bug`：验证结果处理（`pass`=关闭，`fail`=激活）
 - `comment_bug`：按 `id` 添加备注
 
+### 结构化解决说明 `solutionModules`（推荐）
+
+字段：
+- `rootCause`：【根因】触发条件 + 错误行为
+- `fixApproach`：【修复思路】策略说明
+- `logicChange`：【改动逻辑】关键分支/校验/流程变化
+- `impact`：【影响范围】受影响场景 + 结果型回归点
+
+服务端会格式化为多行文本写入禅道，例如：
+
+```text
+【根因】
+...
+
+【修复思路】
+...
+
+【改动逻辑】
+...
+
+【影响范围】
+...
+```
+
+优先级：`solutionModules`（任一非空字段）> 纯文本 `solution` > `comment` 兜底。
+
 示例参数：
-- `resolve_bug`：`{"id":123,"resolution":"fixed","comment":"根因已定位，已按最新字段映射调整处理逻辑"}`
-- `resolve_bug`（建议）：`{"id":123,"resolution":"fixed","solution":"补齐分页参数为空时的默认值分支，避免空值继续进入查询构造；同时收敛异常提示，防止前端重复触发提交"}`
-- `batch_resolve_my_bugs`：`{"status":"active","maxItems":20,"comment":"统一补充非空校验并收敛异常分支"}`
-- `batch_resolve_my_bugs`（建议）：`{"status":"active","maxItems":20,"solution":"统一修正状态切换时的判空与分支顺序，避免旧数据触发空指针；保存前增加兜底校验，异常场景改为明确提示"}`
+- `resolve_bug`（推荐）：
+```json
+{
+  "id": 123,
+  "resolution": "fixed",
+  "solutionModules": {
+    "rootCause": "分页参数为空时仍进入查询构造，导致列表请求异常。",
+    "fixApproach": "为空参数补默认值，并在构造前做兜底校验。",
+    "logicChange": "page/size 为空时回落默认值；非法值改为明确错误提示，避免前端重复提交。",
+    "impact": "列表查询与分页切换；重点回归空参进入与异常提示是否收敛。"
+  }
+}
+```
+- `resolve_bug`（兼容纯文本）：`{"id":123,"resolution":"fixed","solution":"补齐分页参数为空时的默认值分支，避免空值继续进入查询构造；同时收敛异常提示，防止前端重复触发提交"}`
+- `batch_resolve_my_bugs`（推荐共享模块）：
+```json
+{
+  "status": "active",
+  "maxItems": 20,
+  "solutionModules": {
+    "rootCause": "状态切换时旧数据判空顺序错误，触发空指针。",
+    "fixApproach": "统一状态切换的判空与分支顺序。",
+    "logicChange": "保存前增加兜底校验；异常改为明确提示而非静默失败。",
+    "impact": "状态流转相关保存与切换场景。"
+  }
+}
+```
 - `get_my_bugs`（项目集）：`{"status":"active","projectSetId":1001,"limit":50}`
 - `get_my_bugs`（我的）：`{"status":"active","path":"/my/bug","limit":50}`
 - `get_my_bugs`（项目集 + 我的）：`{"status":"active","projectSetId":1001,"path":"/my/bug","limit":50}`
@@ -133,7 +182,7 @@ npm run smoke
 - `verify_bug`：`{"id":123,"result":"pass","comment":"验证通过"}`
 - `comment_bug`：`{"id":123,"comment":"已复现，正在定位根因"}`
 
-`solution` / `comment` 建议直接写“根因 + 修复思路 + 改动逻辑 + 影响范围”，不要默认写 `Evidence:`、`Verify:`、文件路径、编译命令或“已修复并自测”这类无法说明改动内容的表述。
+`solutionModules` / `solution` / `comment` 不要写 `Evidence:`、`Verify:`、文件路径、编译命令或“已修复并自测”这类无法说明改动内容的表述。
 
 使用建议：如果用户提到“项目集”“我的 bug”“项目列表里找不到但禅道里能看到 bug”，优先走项目集视角的 `get_my_bugs`，不要先让用户证明项目已创建。
 

@@ -25,7 +25,19 @@ function log(...args) {
 
 function sanitizeToolArgs(toolName, args) {
   if (!args || typeof args !== "object") return {};
-  const redactedKeys = new Set(["body", "query", "comment", "solution", "password", "token"]);
+  const redactedKeys = new Set([
+    "body",
+    "query",
+    "comment",
+    "solution",
+    "solutionModules",
+    "rootCause",
+    "fixApproach",
+    "logicChange",
+    "impact",
+    "password",
+    "token",
+  ]);
   const sanitized = {};
   for (const [key, value] of Object.entries(args)) {
     if (redactedKeys.has(key)) {
@@ -182,6 +194,7 @@ async function main() {
         const resp = await zentao.resolveBug({
           id: args.id,
           resolution: args.resolution || "fixed",
+          solutionModules: args.solutionModules,
           solution: args.solution || "",
           comment: args.comment || "",
         });
@@ -199,6 +212,7 @@ async function main() {
           projectSetId: args.projectSetId,
           maxItems: args.maxItems,
           resolution: args.resolution || "fixed",
+          solutionModules: args.solutionModules,
           solution: args.solution || "",
           comment: args.comment || "",
           path: args.path || "/bugs",

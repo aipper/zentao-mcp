@@ -35,7 +35,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "lint": "node -c src/index.js && node -c src/zentao.js && node -c src/tools.js && node -c scripts/smoke.mjs && node -c bin/zentao-mcp-server.js",
+    "lint": "node -c src/index.js && node -c src/zentao.js && node -c src/tools.js && node -c src/solution.js && node -c scripts/smoke.mjs && node -c bin/zentao-mcp-server.js",
     "smoke": "node scripts/smoke.mjs",
     "release:npm": "bash scripts/release-npm.sh"
   },

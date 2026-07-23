@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Structured `solutionModules` for `resolve_bug` and `batch_resolve_my_bugs`:
+  - `rootCause` / `fixApproach` / `logicChange` / `impact`
+  - Server formats modules into multi-line ZenTao solution text with 【根因】【修复思路】【改动逻辑】【影响范围】
+- Shared helper module `src/solution.js`
+
+### Changed
+- Plain-text `solution` remains supported for compatibility; when both are provided, non-empty `solutionModules` wins
+- Tool schemas and docs now steer MCP clients toward structured solution modules
+
 ## [0.1.9] - 2024-03-12
 
 ### Added

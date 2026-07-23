@@ -1,3 +1,5 @@
+import { resolveSolutionText } from "./solution.js";
+
 // Constants
 const DEFAULT_RESOLUTION_PREFIX = "解决说明：";
 const DEFAULT_RESOLUTION_FALLBACK = "已处理";
@@ -395,19 +397,42 @@ export function createZenTaoClient(config) {
   }
 
   /**
-   * Build resolution comment from solution, comment or resolution
+   * Build resolution comment from structured modules, solution, comment or resolution.
+   * Structured multi-line solution is written as-is (already labeled).
+   * Plain single-line solution keeps the legacy prefix for compatibility.
    * @param {Object} params
-   * @param {string} [params.solution] - Solution description (preferred)
+   * @param {Object} [params.solutionModules] - Structured solution modules
+   * @param {string} [params.solution] - Free-text solution (legacy)
    * @param {string} [params.comment] - Comment text
    * @param {string} [params.resolution] - Resolution type
-   * @returns {string} Formatted comment
+   * @returns {{ comment: string, solution: string, solutionSource: string, solutionModules: object | null }}
    */
-  function buildResolutionComment({ solution, comment, resolution }) {
-    const normalizedSolution = String(solution || "").trim();
-    if (normalizedSolution) return `${DEFAULT_RESOLUTION_PREFIX}${normalizedSolution}`;
+  function buildResolutionComment({ solutionModules, solution, comment, resolution }) {
+    const resolved = resolveSolutionText({ solutionModules, solution });
+    if (resolved.text) {
+      const isStructured = resolved.source === "modules";
+      return {
+        comment: isStructured ? resolved.text : `${DEFAULT_RESOLUTION_PREFIX}${resolved.text}`,
+        solution: resolved.text,
+        solutionSource: resolved.source,
+        solutionModules: resolved.modules,
+      };
+    }
     const normalizedComment = String(comment || "").trim();
-    if (normalizedComment) return normalizedComment;
-    return `${DEFAULT_RESOLUTION_FALLBACK}，resolution=${String(resolution || "fixed")}`;
+    if (normalizedComment) {
+      return {
+        comment: normalizedComment,
+        solution: "",
+        solutionSource: "comment",
+        solutionModules: null,
+      };
+    }
+    return {
+      comment: `${DEFAULT_RESOLUTION_FALLBACK}，resolution=${String(resolution || "fixed")}`,
+      solution: "",
+      solutionSource: "fallback",
+      solutionModules: null,
+    };
   }
 
   function normalizeUserIdentity(value) {
@@ -1192,6 +1217,7 @@ export function createZenTaoClient(config) {
   async function resolveBug({
     id,
     resolution = "fixed",
+    solutionModules,
     solution = "",
     comment = "",
   } = {}) {
@@ -1202,10 +1228,15 @@ export function createZenTaoClient(config) {
 
     const resolvePath = buildBugResolvePath({ id: bugId });
     const resolvedValue = String(resolution || "fixed");
-    const resolvedComment = buildResolutionComment({ solution, comment, resolution: resolvedValue });
+    const resolutionPayload = buildResolutionComment({
+      solutionModules,
+      solution,
+      comment,
+      resolution: resolvedValue,
+    });
     const body = {
       resolution: resolvedValue,
-      comment: resolvedComment,
+      comment: resolutionPayload.comment,
     };
 
     const resp = await call({ path: resolvePath, method: "POST", body });
@@ -1213,8 +1244,10 @@ export function createZenTaoClient(config) {
       id: bugId,
       resolved: true,
       resolution: resolvedValue,
-      solution: String(solution || "").trim(),
-      comment: resolvedComment,
+      solution: resolutionPayload.solution,
+      solutionSource: resolutionPayload.solutionSource,
+      solutionModules: resolutionPayload.solutionModules,
+      comment: resolutionPayload.comment,
       raw: { status: resp.status },
     };
   }
@@ -1331,6 +1364,7 @@ export function createZenTaoClient(config) {
     projectSetId,
     maxItems = 20,
     resolution = "fixed",
+    solutionModules,
     solution = "",
     comment = "",
     path = "/bugs",
@@ -1363,6 +1397,7 @@ export function createZenTaoClient(config) {
         const result = await resolveBug({
           id: bugId,
           resolution,
+          solutionModules,
           solution,
           comment,
         });
