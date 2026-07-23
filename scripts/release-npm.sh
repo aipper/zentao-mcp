@@ -189,9 +189,24 @@ backup_package_for_restore() {
   release_restore_on_exit=1
 }
 
+strip_npm_noise() {
+  # npm may append "npm notice ..." on stderr; keep only useful lines.
+  printf '%s' "$1" | tr -d '\r' | grep -Ev '^(npm notice|npm warn|npm error)[[:space:]]' || true
+}
+
+extract_npm_username() {
+  # Prefer first non-empty, non-notice line from npm whoami output.
+  strip_npm_noise "$1" | awk 'NF { print $0; exit }'
+}
+
 check_publish_ownership() {
   local npm_user="$1"
   local package_name="$2"
+
+  if [[ -z "$npm_user" || "$npm_user" == *" "* || "$npm_user" == *npm*notice* ]]; then
+    warn "publish ownership precheck skipped: invalid npm username '$npm_user'"
+    return 0
+  fi
 
   local view_out=""
   local view_code=0
@@ -221,7 +236,10 @@ check_publish_ownership() {
     return 0
   fi
 
-  if echo "$owners_out" | grep -Eiq "^${npm_user}[[:space:]]"; then
+  # Compare against cleaned owner list lines (username is first column).
+  local cleaned_owners
+  cleaned_owners="$(strip_npm_noise "$owners_out")"
+  if echo "$cleaned_owners" | grep -Eiq "^${npm_user}([[:space:]]|$)"; then
     log "publish ownership precheck: ok ($npm_user owns $package_name)"
     return 0
   fi
@@ -362,12 +380,19 @@ if [[ "$SKIP_WHOAMI" == "1" ]]; then
   warn "npm whoami skipped (--skip-whoami)"
 else
   set +e
+  # Keep stderr for diagnostics, but never bake npm notice lines into username.
   whoami_out="$(npm whoami 2>&1)"
   whoami_code=$?
   set -e
   if [[ "$whoami_code" == "0" ]]; then
-    npm_user="$(printf '%s' "$whoami_out" | tr -d '\r\n')"
-    log "npm whoami: ok ($npm_user)"
+    npm_user="$(extract_npm_username "$whoami_out")"
+    if [[ -z "$npm_user" ]]; then
+      warn "npm whoami succeeded but username could not be parsed:"
+      echo "$whoami_out" >&2
+      npm_user=""
+    else
+      log "npm whoami: ok ($npm_user)"
+    fi
   else
     warn "npm whoami failed:"
     echo "$whoami_out" >&2

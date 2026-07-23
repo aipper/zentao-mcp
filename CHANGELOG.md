@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - Plain-text `solution` remains supported for compatibility; when both are provided, non-empty `solutionModules` wins
 - Tool schemas and docs now steer MCP clients toward structured solution modules
 
+### Fixed
+- `scripts/release-npm.sh` no longer treats npm upgrade notices as part of `npm whoami` username during publish ownership checks
+
 ## [0.1.9] - 2024-03-12
 
 ### Added
