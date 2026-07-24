@@ -108,12 +108,17 @@ export const TOOLS = [
   {
     name: "resolve_bug",
     description:
-      "Resolve one bug by ID (default resolution=fixed). Prefer solutionModules {rootCause, fixApproach, logicChange, impact}; plain solution remains supported for compatibility.",
+      "Resolve one bug by ID via POST /bugs/{id}/resolve (default resolution=fixed). Many ZenTao instances require resolvedBuild (解决版本); pass it or set ZENTAO_DEFAULT_RESOLVED_BUILD (e.g. trunk). Prefer solutionModules {rootCause, fixApproach, logicChange, impact}; plain solution remains supported. Do NOT use raw HTTP PUT/edit as a resolve substitute — it may only flip status without writing solution text.",
     inputSchema: {
       type: "object",
       properties: {
         id: { type: "number", minimum: 1, description: "Bug ID" },
         resolution: { type: "string", description: "Default fixed" },
+        resolvedBuild: {
+          type: "string",
+          description:
+            "解决版本 (required by many instances). Falls back to ZENTAO_DEFAULT_RESOLVED_BUILD. Common value: trunk",
+        },
         solutionModules: SOLUTION_MODULES_SCHEMA,
         solution: PLAIN_SOLUTION_SCHEMA,
         comment: {
@@ -128,7 +133,7 @@ export const TOOLS = [
   {
     name: "batch_resolve_my_bugs",
     description:
-      "Batch resolve my bugs (default status=active, resolution=fixed). Prefer projectSetId or /my/bug for project-set scope, and pass shared solutionModules {rootCause, fixApproach, logicChange, impact}.",
+      "Batch resolve my bugs via the real resolve API (default status=active, resolution=fixed). Requires resolvedBuild or ZENTAO_DEFAULT_RESOLVED_BUILD on instances that validate 解决版本. Prefer projectSetId or /my/bug for project-set scope, and pass shared solutionModules {rootCause, fixApproach, logicChange, impact}.",
     inputSchema: {
       type: "object",
       properties: {
@@ -149,6 +154,11 @@ export const TOOLS = [
         },
         maxItems: { type: "number", minimum: 1, maximum: 100, description: "Max resolve count, default 20" },
         resolution: { type: "string", description: "Default fixed" },
+        resolvedBuild: {
+          type: "string",
+          description:
+            "Shared 解决版本 for the batch. Falls back to ZENTAO_DEFAULT_RESOLVED_BUILD. Common value: trunk",
+        },
         solutionModules: {
           ...SOLUTION_MODULES_SCHEMA,
           description:
@@ -258,6 +268,12 @@ export function assertToolArgs(name, args) {
     if (args.path !== undefined) {
       throw new Error("resolve_bug.path is no longer supported");
     }
+    if (args.resolvedBuild !== undefined && typeof args.resolvedBuild !== "string") {
+      throw new Error("resolve_bug.resolvedBuild must be a string");
+    }
+    if (typeof args.resolvedBuild === "string" && !args.resolvedBuild.trim()) {
+      throw new Error("resolve_bug.resolvedBuild must be a non-empty string when provided");
+    }
     assertSolutionArgs("resolve_bug", args);
   }
   if (name === "batch_resolve_my_bugs") {
@@ -278,6 +294,12 @@ export function assertToolArgs(name, args) {
     }
     if (args.projectId !== undefined && (!Number.isFinite(args.projectId) || args.projectId < 1)) {
       throw new Error("batch_resolve_my_bugs.projectId must be a number >= 1");
+    }
+    if (args.resolvedBuild !== undefined && typeof args.resolvedBuild !== "string") {
+      throw new Error("batch_resolve_my_bugs.resolvedBuild must be a string");
+    }
+    if (typeof args.resolvedBuild === "string" && !args.resolvedBuild.trim()) {
+      throw new Error("batch_resolve_my_bugs.resolvedBuild must be a non-empty string when provided");
     }
     if (args.path !== undefined) {
       if (typeof args.path !== "string") throw new Error("batch_resolve_my_bugs.path must be a string");

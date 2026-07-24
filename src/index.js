@@ -95,6 +95,7 @@ function getConfigFromEnv() {
   const defaultProductId = Number(process.env.ZENTAO_PRODUCT_ID || "0") || null;
   const defaultProjectSetId = Number(process.env.ZENTAO_PROJECT_SET_ID || "0") || null;
   const defaultProjectId = Number(process.env.ZENTAO_PROJECT_ID || "0") || null;
+  const defaultResolvedBuild = String(process.env.ZENTAO_DEFAULT_RESOLVED_BUILD || "trunk").trim();
   const myBugsPath = String(process.env.ZENTAO_MY_BUGS_PATH || "").trim();
   const bugsFallbackPaths = String(process.env.ZENTAO_BUGS_FALLBACK_PATHS || "")
     .split(",")
@@ -118,6 +119,7 @@ function getConfigFromEnv() {
     defaultProductId,
     defaultProjectSetId,
     defaultProjectId,
+    defaultResolvedBuild,
     myBugsPath,
     bugsFallbackPaths,
     projectSetBugsPaths,
@@ -194,6 +196,7 @@ async function main() {
         const resp = await zentao.resolveBug({
           id: args.id,
           resolution: args.resolution || "fixed",
+          resolvedBuild: args.resolvedBuild,
           solutionModules: args.solutionModules,
           solution: args.solution || "",
           comment: args.comment || "",
@@ -212,6 +215,7 @@ async function main() {
           projectSetId: args.projectSetId,
           maxItems: args.maxItems,
           resolution: args.resolution || "fixed",
+          resolvedBuild: args.resolvedBuild,
           solutionModules: args.solutionModules,
           solution: args.solution || "",
           comment: args.comment || "",
@@ -250,13 +254,20 @@ async function main() {
     } catch (err) {
       log(`Tool error: ${toolName}`, err?.message || err);
 
+      const message = String(err?.message || err);
+      const needsResolvedBuild =
+        /resolvedBuild|解决版本/i.test(message) || /resolvedBuild|解决版本/i.test(String(err?.responseText || ""));
       const errorPayload = {
         ok: false,
         tool: rawToolName,
-        message: String(err?.message || err),
-          status: err?.status ?? null,
-          hint: "If you see 'Need product id', set env ZENTAO_PRODUCT_ID or pass productId in get_my_bugs. For project-scoped bugs, set ZENTAO_PROJECT_ID or pass projectId.",
-          hint2: "For project-set instances, prefer get_my_bugs with projectSetId or ZENTAO_MY_BUGS_PATH=/my/bug; list_my_projects may miss project sets without concrete projects.",
+        message,
+        status: err?.status ?? null,
+        hint: needsResolvedBuild
+          ? "Resolve requires 解决版本: pass resolvedBuild (e.g. trunk) or set ZENTAO_DEFAULT_RESOLVED_BUILD. Do not substitute PUT /bugs/{id} edit for resolve — solutionModules will not be written."
+          : "If you see 'Need product id', set env ZENTAO_PRODUCT_ID or pass productId in get_my_bugs. For project-scoped bugs, set ZENTAO_PROJECT_ID or pass projectId.",
+        hint2: needsResolvedBuild
+          ? "Use resolve_bug / batch_resolve_my_bugs only; they call POST /bugs/{id}/resolve with resolution + resolvedBuild + comment."
+          : "For project-set instances, prefer get_my_bugs with projectSetId or ZENTAO_MY_BUGS_PATH=/my/bug; list_my_projects may miss project sets without concrete projects.",
       };
       return toMcpTextResult(JSON.stringify(errorPayload, null, 2), { isError: true });
     }
