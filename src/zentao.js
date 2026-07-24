@@ -101,6 +101,7 @@ function createAbortSignal(timeoutMs) {
  * @param {string} [config.myBugsPath] - My bugs path
  * @param {string[]} [config.bugsFallbackPaths] - Bug fallback paths
  * @param {string[]} [config.projectSetBugsPaths] - Project set bug paths
+ * @param {string} [config.defaultResolvedBuild] - Default resolvedBuild for resolve APIs (e.g. "trunk")
  * @param {Object} config.auth - Authentication credentials
  * @param {string} config.auth.account - Account name
  * @param {string} config.auth.password - Account password
@@ -117,11 +118,14 @@ export function createZenTaoClient(config) {
     defaultProductId,
     defaultProjectSetId,
     defaultProjectId,
+    defaultResolvedBuild,
     myBugsPath,
     bugsFallbackPaths,
     projectSetBugsPaths,
     auth,
   } = config;
+
+  const normalizedDefaultResolvedBuild = String(defaultResolvedBuild || "").trim();
 
   const normalizedBaseUrl = String(baseUrl || "").replace(/\/+$/, "");
   const parsedBaseUrl = new URL(normalizedBaseUrl);
@@ -146,7 +150,10 @@ export function createZenTaoClient(config) {
       const contentType = resp.headers.get("content-type") || "";
       const data = contentType.includes("application/json") ? safeJsonParse(text) : text;
       if (!resp.ok) {
-        const err = new Error(`Request failed ${resp.status}`);
+        const detail = formatApiErrorDetail(data, text);
+        const err = new Error(
+          detail ? `Request failed ${resp.status}: ${detail}` : `Request failed ${resp.status}`
+        );
         err.status = resp.status;
         err.data = data;
         err.responseText = truncate(String(text), MAX_ERROR_TEXT_LENGTH);
@@ -169,6 +176,35 @@ export function createZenTaoClient(config) {
   function truncate(s, max) {
     if (s.length <= max) return s;
     return s.slice(0, max) + "...(truncated)";
+  }
+
+  function formatApiErrorDetail(data, rawText) {
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      const errorNode = data.error ?? data.message ?? data.msg ?? null;
+      if (typeof errorNode === "string" && errorNode.trim()) {
+        return truncate(errorNode.trim(), 500);
+      }
+      if (errorNode && typeof errorNode === "object" && !Array.isArray(errorNode)) {
+        const parts = [];
+        for (const [key, value] of Object.entries(errorNode)) {
+          if (Array.isArray(value)) {
+            const joined = value.map((item) => String(item || "").trim()).filter(Boolean).join("; ");
+            if (joined) parts.push(`${key}: ${joined}`);
+            continue;
+          }
+          if (value != null && String(value).trim()) {
+            parts.push(`${key}: ${String(value).trim()}`);
+          }
+        }
+        if (parts.length > 0) return truncate(parts.join(" | "), 500);
+      }
+      if (typeof data.error === "string" && data.error.trim()) {
+        return truncate(data.error.trim(), 500);
+      }
+    }
+    const raw = String(rawText || "").trim();
+    if (!raw) return "";
+    return truncate(raw, 500);
   }
 
   function tokenExpired() {
@@ -1217,6 +1253,7 @@ export function createZenTaoClient(config) {
   async function resolveBug({
     id,
     resolution = "fixed",
+    resolvedBuild,
     solutionModules,
     solution = "",
     comment = "",
@@ -1228,6 +1265,16 @@ export function createZenTaoClient(config) {
 
     const resolvePath = buildBugResolvePath({ id: bugId });
     const resolvedValue = String(resolution || "fixed");
+    const buildValue = String(
+      resolvedBuild !== undefined && resolvedBuild !== null
+        ? resolvedBuild
+        : normalizedDefaultResolvedBuild
+    ).trim();
+    if (!buildValue) {
+      throw new Error(
+        "resolveBug requires resolvedBuild (pass resolvedBuild or set ZENTAO_DEFAULT_RESOLVED_BUILD, e.g. trunk)"
+      );
+    }
     const resolutionPayload = buildResolutionComment({
       solutionModules,
       solution,
@@ -1236,6 +1283,7 @@ export function createZenTaoClient(config) {
     });
     const body = {
       resolution: resolvedValue,
+      resolvedBuild: buildValue,
       comment: resolutionPayload.comment,
     };
 
@@ -1244,6 +1292,7 @@ export function createZenTaoClient(config) {
       id: bugId,
       resolved: true,
       resolution: resolvedValue,
+      resolvedBuild: buildValue,
       solution: resolutionPayload.solution,
       solutionSource: resolutionPayload.solutionSource,
       solutionModules: resolutionPayload.solutionModules,
@@ -1364,6 +1413,7 @@ export function createZenTaoClient(config) {
     projectSetId,
     maxItems = 20,
     resolution = "fixed",
+    resolvedBuild,
     solutionModules,
     solution = "",
     comment = "",
@@ -1397,11 +1447,16 @@ export function createZenTaoClient(config) {
         const result = await resolveBug({
           id: bugId,
           resolution,
+          resolvedBuild,
           solutionModules,
           solution,
           comment,
         });
-        success.push({ id: bugId, status: result.raw.status });
+        success.push({
+          id: bugId,
+          status: result.raw.status,
+          resolvedBuild: result.resolvedBuild,
+        });
       } catch (err) {
         failed.push({ id: bugId, error: String(err?.message || err) });
         if (stopOnError) break;
