@@ -4,10 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-07-24
+
+### Added
+- `resolvedBuild` on `resolve_bug` / `batch_resolve_my_bugs` (maps to ZenTao 解决版本)
+- Env `ZENTAO_DEFAULT_RESOLVED_BUILD` (default `trunk`) when tool args omit `resolvedBuild`
+- API error body is included in HTTP failure messages (e.g. `resolvedBuild: 『解决版本』不能为空。`)
+
+### Changed
+- Resolve always sends `resolvedBuild` on `POST /bugs/{id}/resolve` so instances that require 解决版本 stop returning opaque 400
+- Error hints call out missing 解决版本 and warn against substituting PUT/edit for resolve
+
+### Fixed
+- Resolve failures that only said `Request failed 400` with a misleading productId hint when the real cause was empty `resolvedBuild`
+
+## [0.1.15]
+
 ### Added
 - Structured `solutionModules` for `resolve_bug` and `batch_resolve_my_bugs`:
   - `rootCause` / `fixApproach` / `logicChange` / `impact`
-  - Server formats modules into multi-line ZenTao solution text with 【根因】【修复思路】【改动逻辑】【影响范围】
+  - Server formats modules into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】
 - Shared helper module `src/solution.js`
 
 ### Changed

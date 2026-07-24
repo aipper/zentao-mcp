@@ -21,7 +21,9 @@ MIT - 详见 [LICENSE](./LICENSE) 文件
 - `ZENTAO_ACCOUNT`
 - `ZENTAO_PASSWORD`
 - （可选）`ZENTAO_PRODUCT_ID`：你的禅道实例若报 `Need product id` 时设置
+- （可选）`ZENTAO_PROJECT_ID`：按项目查 bug 时设置（直接 `/projects/{id}/bugs`）
 - （可选）`ZENTAO_PROJECT_SET_ID`：你的 bug 若在项目集视角，设置项目集 ID
+- （可选）`ZENTAO_DEFAULT_RESOLVED_BUILD`：解决 bug 时的默认「解决版本」，默认 `trunk`（很多实例必填）
 - （可选）`ZENTAO_MY_BUGS_PATH`：我的 bug 专用接口路径（如 `/my/bug`）
 - （可选）`ZENTAO_BUGS_FALLBACK_PATHS`：bug 列表回退路径（逗号分隔）
 - （可选）`ZENTAO_PROJECT_SET_BUGS_PATHS`：项目集 bug 路径模板（支持 `{projectSetId}`）
@@ -114,8 +116,8 @@ npm run smoke
 - `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调；不适合作为项目集 bug 的唯一发现入口）
 - `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`/`projectSetId`，默认路径 `/bugs`；`path` 仅允许 `/bugs`、`/my/bug`、`/my/bugs`）
 - `get_bug_detail`：按 `id` 获取 bug 详情（固定读取 `/bugs/{id}`；返回安全裁剪后的 bug 摘要与同源图片链接，不直接透传外部图片地址或原始附件外链）
-- `resolve_bug`：按 `id` 处理单个 bug 状态（默认 `resolution=fixed`；优先 `solutionModules`，兼容纯文本 `solution`）
-- `batch_resolve_my_bugs`：批量处理“我的 bug”（默认筛选 `status=active`，支持 `productId`/`projectSetId`，默认遇错即停，`maxItems` 上限 100；优先共享 `solutionModules`）
+- `resolve_bug`：按 `id` 调用真正的解决接口 `POST /bugs/{id}/resolve`（默认 `resolution=fixed`；`resolvedBuild` 默认取 `ZENTAO_DEFAULT_RESOLVED_BUILD`/`trunk`；优先 `solutionModules`，兼容纯文本 `solution`）
+- `batch_resolve_my_bugs`：批量解决“我的 bug”（同上 resolve API；默认筛选 `status=active`，支持 `productId`/`projectSetId`/`resolvedBuild`，默认遇错即停，`maxItems` 上限 100；优先共享 `solutionModules`）
 - `close_bug`：按 `id` 关闭 bug
 - `verify_bug`：验证结果处理（`pass`=关闭，`fail`=激活）
 - `comment_bug`：按 `id` 添加备注
@@ -146,12 +148,17 @@ npm run smoke
 
 优先级：`solutionModules`（任一非空字段）> 纯文本 `solution` > `comment` 兜底。
 
+**解决版本 `resolvedBuild`**：很多禅道实例校验「解决版本不能为空」。请传工具参数 `resolvedBuild`，或配置 `ZENTAO_DEFAULT_RESOLVED_BUILD`（默认 `trunk`）。无版本列表时 `trunk` 通常可用。
+
+**不要用 HTTP 编辑冒充解决**：`PUT /bugs/{id}` 或网页表单“编辑”只可能改字段/状态，**不会**走 resolve 动作，也**不会**把 MCP 的 `solutionModules` 模板写进解决说明。必须用 `resolve_bug` / `batch_resolve_my_bugs`。
+
 示例参数：
 - `resolve_bug`（推荐）：
 ```json
 {
   "id": 123,
   "resolution": "fixed",
+  "resolvedBuild": "trunk",
   "solutionModules": {
     "rootCause": "分页参数为空时仍进入查询构造，导致列表请求异常。",
     "fixApproach": "为空参数补默认值，并在构造前做兜底校验。",
@@ -160,12 +167,13 @@ npm run smoke
   }
 }
 ```
-- `resolve_bug`（兼容纯文本）：`{"id":123,"resolution":"fixed","solution":"补齐分页参数为空时的默认值分支，避免空值继续进入查询构造；同时收敛异常提示，防止前端重复触发提交"}`
+- `resolve_bug`（兼容纯文本）：`{"id":123,"resolution":"fixed","resolvedBuild":"trunk","solution":"补齐分页参数为空时的默认值分支，避免空值继续进入查询构造；同时收敛异常提示，防止前端重复触发提交"}`
 - `batch_resolve_my_bugs`（推荐共享模块）：
 ```json
 {
   "status": "active",
   "maxItems": 20,
+  "resolvedBuild": "trunk",
   "solutionModules": {
     "rootCause": "状态切换时旧数据判空顺序错误，触发空指针。",
     "fixApproach": "统一状态切换的判空与分支顺序。",
