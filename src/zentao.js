@@ -1288,6 +1288,18 @@ export function createZenTaoClient(config) {
     };
 
     const resp = await call({ path: resolvePath, method: "POST", body });
+
+    // Auto-post the solution/comment text as a separate reply so it appears
+    // in the bug discussion, not just in the resolve action record.
+    let autoComment;
+    if (resolutionPayload.solutionSource !== "fallback" && resolutionPayload.comment) {
+      try {
+        autoComment = await commentBug({ id: bugId, comment: resolutionPayload.comment });
+      } catch (_) {
+        autoComment = { commented: false, error: "auto-comment failed, resolve succeeded" };
+      }
+    }
+
     return {
       id: bugId,
       resolved: true,
@@ -1297,6 +1309,7 @@ export function createZenTaoClient(config) {
       solutionSource: resolutionPayload.solutionSource,
       solutionModules: resolutionPayload.solutionModules,
       comment: resolutionPayload.comment,
+      autoComment,
       raw: { status: resp.status },
     };
   }
