@@ -1,6 +1,6 @@
 {
   "name": "@aipper/zentao-mcp-server",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "private": false,
   "type": "module",
   "description": "A minimal MCP server for ZenTao (token + focused bug workflow tools).",
