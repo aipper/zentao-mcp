@@ -222,6 +222,20 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "upload_attachment",
+    description: "Upload a file (screenshot, log) and attach to a bug as visual evidence. Use after bug fix to provide screenshot proof.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bugId: { type: "number", minimum: 1, description: "Bug ID to attach to" },
+        filePath: { type: "string", description: "Absolute path to file on disk" },
+        fileName: { type: "string", description: "Optional display name (defaults to file basename)" },
+      },
+      required: ["bugId", "filePath"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export function assertToolArgs(name, args) {

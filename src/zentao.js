@@ -1501,6 +1501,64 @@ export function createZenTaoClient(config) {
     throw lastErr;
   }
 
+  /**
+   * Upload a file and attach it to a bug.
+   * @param {number} bugId - Bug ID to attach to
+   * @param {string} filePath - Absolute path to the file on disk
+   * @param {string} [fileName] - Optional display name for the file
+   */
+  async function uploadFile({ bugId, filePath, fileName }) {
+    const fs = await import("node:fs");
+    const fileBuffer = fs.readFileSync(filePath);
+    const displayName = fileName || filePath.split("/").pop() || "attachment";
+    const tokenInfo = await getToken();
+
+    // Step 1: Upload file via ZenTao page endpoint (multipart)
+    const uploadUrl = `${normalizedBaseUrl}index.php?m=file&f=upload`;
+    const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
+    let body = "";
+    body += `--${boundary}\r\n`;
+    body += `Content-Disposition: form-data; name="file"; filename="${displayName}"\r\n`;
+    body += `Content-Type: application/octet-stream\r\n\r\n`;
+    // Raw binary cannot be in string body — use Buffer approach
+    const header = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${displayName}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+    );
+    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const multipartBody = Buffer.concat([header, fileBuffer, footer]);
+
+    const uploadResp = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        Token: tokenInfo.token,
+      },
+      body: multipartBody,
+    });
+
+    const uploadResult = await uploadResp.json();
+    const fileId = uploadResult?.id || uploadResult?.data?.id || uploadResult?.fileID;
+
+    if (!fileId) {
+      throw new Error(`File upload failed: no file ID in response. ${JSON.stringify(uploadResult).slice(0, 200)}`);
+    }
+
+    // Step 2: Link file to bug via API
+    const linkResult = await call({
+      path: `/bugs/${bugId}/files`,
+      method: "POST",
+      body: { files: [fileId], uid: Date.now() },
+    });
+
+    return {
+      fileId,
+      bugId,
+      fileName: displayName,
+      uploaded: true,
+      linked: linkResult?.status >= 200 && linkResult?.status < 300,
+    };
+  }
+
   return {
     getToken,
     call,
@@ -1513,5 +1571,6 @@ export function createZenTaoClient(config) {
     verifyBug,
     commentBug,
     batchResolveMyBugs,
+    uploadFile,
   };
 }

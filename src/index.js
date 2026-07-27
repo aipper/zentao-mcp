@@ -63,6 +63,7 @@ const KNOWN_TOOL_NAMES = new Set([
   "close_bug",
   "verify_bug",
   "comment_bug",
+  "upload_attachment",
 ]);
 
 function normalizeToolName(rawName) {
@@ -246,6 +247,15 @@ async function main() {
         const resp = await zentao.commentBug({
           id: args.id,
           comment: args.comment || "",
+        });
+        return toMcpTextResult(JSON.stringify(resp, null, 2));
+      }
+
+      if (toolName === "upload_attachment") {
+        const resp = await zentao.uploadFile({
+          bugId: args.bugId,
+          filePath: args.filePath,
+          fileName: args.fileName,
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }
