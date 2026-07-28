@@ -247,6 +247,7 @@ async function main() {
         const resp = await zentao.commentBug({
           id: args.id,
           comment: args.comment || "",
+          solutionModules: args.solutionModules,
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }

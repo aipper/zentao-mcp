@@ -217,7 +217,7 @@ export const TOOLS = [
   },
   {
     name: "comment_bug",
-    description: "Add comment to one bug by ID. For solution updates, explain analysis and logic changes rather than build/test evidence.",
+    description: "Add comment to one bug by ID. REQUIRES solutionModules {rootCause, fixApproach, logicChange, impact} — server auto-formats into 【根因】【修复思路】【改动逻辑】【影响范围】 multi-line template text. Plain comment without solutionModules is no longer accepted.",
     inputSchema: {
       type: "object",
       properties: {
@@ -225,10 +225,15 @@ export const TOOLS = [
         comment: {
           type: "string",
           description:
-            "Comment content. For bug handling, prefer root cause, fix idea, and changed logic; avoid Evidence/Verify labels, file paths, and compile/test commands.",
+            "IGNORED for writing — only solutionModules is accepted. Kept for backward compatibility only.",
+        },
+        solutionModules: {
+          ...SOLUTION_MODULES_SCHEMA,
+          description:
+            "REQUIRED — comment will REJECT without it. Structured solution. Server auto-formats into multi-line 【根因】【修复思路】【改动逻辑】【影响范围】 template text. At least one field must be non-empty.",
         },
       },
-      required: ["id", "comment"],
+      required: ["id"],
       additionalProperties: false,
     },
   },
@@ -365,8 +370,8 @@ export function assertToolArgs(name, args) {
     if (!Number.isFinite(args.id) || Number(args.id) < 1) {
       throw new Error("comment_bug.id must be a number >= 1");
     }
-    if (typeof args.comment !== "string" || !args.comment.trim()) {
-      throw new Error("comment_bug.comment must be a non-empty string");
+    if (!args.solutionModules || typeof args.solutionModules !== "object") {
+      throw new Error("comment_bug REQUIRES solutionModules {rootCause, fixApproach, logicChange, impact}; plain comment is no longer accepted");
     }
     if (args.path !== undefined) {
       throw new Error("comment_bug.path is no longer supported");

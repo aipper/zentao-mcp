@@ -1,4 +1,4 @@
-import { resolveSolutionText, normalizeSolutionModules } from "./solution.js";
+import { resolveSolutionText, normalizeSolutionModules, formatSolutionModules } from "./solution.js";
 
 // Constants
 const DEFAULT_RESOLUTION_PREFIX = "解决说明：";
@@ -1397,15 +1397,20 @@ export function createZenTaoClient(config) {
     };
   }
 
-  async function commentBug({ id, comment } = {}) {
+  async function commentBug({ id, comment, solutionModules } = {}) {
     const bugId = Number(id);
     if (!Number.isFinite(bugId) || bugId < 1) {
       throw new Error("commentBug requires a valid bug id");
     }
-    const text = String(comment || "").trim();
-    if (!text) {
-      throw new Error("commentBug requires non-empty comment");
+
+    const formattedModules = formatSolutionModules(solutionModules);
+    if (!formattedModules) {
+      throw new Error(
+        "commentBug REQUIRES non-empty solutionModules {rootCause, fixApproach, logicChange, impact} to write 【根因】【修复思路】【改动逻辑】【影响范围】 template text. " +
+        "Plain comment without solutionModules is no longer accepted."
+      );
     }
+    const text = formattedModules;
 
     const primaryPath = buildBugCommentPath({ id: bugId });
     const body = { comment: text };
@@ -1415,6 +1420,7 @@ export function createZenTaoClient(config) {
         id: bugId,
         commented: true,
         comment: text,
+        solutionSource: formattedModules ? "modules" : "comment",
         raw: { status: resp.status, path: primaryPath },
       };
     } catch (err) {
@@ -1425,6 +1431,7 @@ export function createZenTaoClient(config) {
           id: bugId,
           commented: true,
           comment: text,
+          solutionSource: formattedModules ? "modules" : "comment",
           raw: { status: resp.status, path: fallbackPath },
         };
       }
