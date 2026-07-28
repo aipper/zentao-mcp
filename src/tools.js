@@ -41,7 +41,7 @@ const SOLUTION_MODULES_SCHEMA = {
 const PLAIN_SOLUTION_SCHEMA = {
   type: "string",
   description:
-    "Legacy free-text solution. Prefer solutionModules. If both are set, solutionModules wins when it has any non-empty field.",
+    "DEPRECATED free-text solution. Always prefer solutionModules instead — this legacy field does NOT produce template formatting (【根因】【修复思路】【改动逻辑】【影响范围】). If both are set, non-empty solutionModules wins.",
 };
 
 export const TOOLS = [
@@ -108,7 +108,7 @@ export const TOOLS = [
   {
     name: "resolve_bug",
     description:
-      "Resolve one bug by ID via POST /bugs/{id}/resolve (default resolution=fixed). Many ZenTao instances require resolvedBuild (解决版本); pass it or set ZENTAO_DEFAULT_RESOLVED_BUILD (e.g. trunk). Prefer solutionModules {rootCause, fixApproach, logicChange, impact}; plain solution remains supported. Do NOT use raw HTTP PUT/edit as a resolve substitute — it may only flip status without writing solution text.",
+      "Resolve one bug by ID via POST /bugs/{id}/resolve. REQUIREs non-empty solutionModules {rootCause, fixApproach, logicChange, impact} — without it the resolve call will REJECT with an error. Plain comment/solution is no longer accepted. Many instances require resolvedBuild (解决版本); pass it or set ZENTAO_DEFAULT_RESOLVED_BUILD (e.g. trunk). Do NOT use raw HTTP PUT/edit as a resolve substitute — it only flips status without writing solution text.",
     inputSchema: {
       type: "object",
       properties: {
@@ -119,11 +119,18 @@ export const TOOLS = [
           description:
             "解决版本 (required by many instances). Falls back to ZENTAO_DEFAULT_RESOLVED_BUILD. Common value: trunk",
         },
-        solutionModules: SOLUTION_MODULES_SCHEMA,
-        solution: PLAIN_SOLUTION_SCHEMA,
+        solutionModules: {
+          ...SOLUTION_MODULES_SCHEMA,
+          description:
+            "REQUIRED — resolve WILL REJECT without it. Structured solution object. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. At least one field must be non-empty.",
+        },
+        solution: {
+          type: "string",
+          description: "IGNORED for resolve — only solutionModules is accepted. This field is kept for backward compatibility only.",
+        },
         comment: {
           type: "string",
-          description: "Optional resolve comment. If used for bug updates, prefer change summary over build/test proof.",
+          description: "IGNORED for resolve — only solutionModules is accepted. This field only appends plain text to the action record if solutionModules is also present.",
         },
       },
       required: ["id"],
@@ -133,7 +140,7 @@ export const TOOLS = [
   {
     name: "batch_resolve_my_bugs",
     description:
-      "Batch resolve my bugs via the real resolve API (default status=active, resolution=fixed). Requires resolvedBuild or ZENTAO_DEFAULT_RESOLVED_BUILD on instances that validate 解决版本. Prefer projectSetId or /my/bug for project-set scope, and pass shared solutionModules {rootCause, fixApproach, logicChange, impact}.",
+      "Batch resolve my bugs via the real resolve API (default status=active, resolution=fixed). REQUIRES shared non-empty solutionModules {rootCause, fixApproach, logicChange, impact} — without it the batch will REJECT with an error. Plain comment/solution is no longer accepted. Requires resolvedBuild or ZENTAO_DEFAULT_RESOLVED_BUILD on instances that validate 解决版本. Prefer projectSetId or /my/bug for project-set scope.",
     inputSchema: {
       type: "object",
       properties: {
@@ -162,12 +169,15 @@ export const TOOLS = [
         solutionModules: {
           ...SOLUTION_MODULES_SCHEMA,
           description:
-            "Preferred shared structured solution for the batch. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. Write common root cause and shared logic changes.",
+            "REQUIRED — resolve WILL REJECT without it. Shared structured solution for the batch. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. Write common root cause and shared logic changes.",
         },
-        solution: PLAIN_SOLUTION_SCHEMA,
+        solution: {
+          type: "string",
+          description: "IGNORED for resolve — only solutionModules is accepted. This field is kept for backward compatibility only.",
+        },
         comment: {
           type: "string",
-          description: "Optional resolve comment. Prefer business-facing change summary over proof-style output.",
+          description: "IGNORED for resolve — only solutionModules is accepted. This field only appends plain text to the action record if solutionModules is also present.",
         },
         path: {
           type: "string",

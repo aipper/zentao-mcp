@@ -1,4 +1,4 @@
-import { resolveSolutionText } from "./solution.js";
+import { resolveSolutionText, normalizeSolutionModules } from "./solution.js";
 
 // Constants
 const DEFAULT_RESOLUTION_PREFIX = "解决说明：";
@@ -1275,6 +1275,13 @@ export function createZenTaoClient(config) {
         "resolveBug requires resolvedBuild (pass resolvedBuild or set ZENTAO_DEFAULT_RESOLVED_BUILD, e.g. trunk)"
       );
     }
+    const validatedModules = normalizeSolutionModules(solutionModules);
+    if (!validatedModules) {
+      throw new Error(
+        "resolveBug REQUIRES non-empty solutionModules {rootCause, fixApproach, logicChange, impact} to write 【根因】【修复思路】【改动逻辑】【影响范围】 template text. " +
+        "Passing plain comment or solution without solutionModules is no longer accepted — the bug will NOT be resolved."
+      );
+    }
     const resolutionPayload = buildResolutionComment({
       solutionModules,
       solution,
@@ -1285,6 +1292,7 @@ export function createZenTaoClient(config) {
       resolution: resolvedValue,
       resolvedBuild: buildValue,
       comment: resolutionPayload.comment,
+      solution: resolutionPayload.solution || undefined,
     };
 
     const resp = await call({ path: resolvePath, method: "POST", body });
@@ -1300,6 +1308,13 @@ export function createZenTaoClient(config) {
       }
     }
 
+    const suggestion =
+      resolutionPayload.solutionSource !== "modules" && resolutionPayload.solutionSource !== "fallback"
+        ? {
+            tip: "Pass structured solutionModules {rootCause, fixApproach, logicChange, impact} to get formatted 【根因】【修复思路】【改动逻辑】【影响范围】 template text.",
+          }
+        : {};
+
     return {
       id: bugId,
       resolved: true,
@@ -1310,6 +1325,7 @@ export function createZenTaoClient(config) {
       solutionModules: resolutionPayload.solutionModules,
       comment: resolutionPayload.comment,
       autoComment,
+      ...suggestion,
       raw: { status: resp.status },
     };
   }
@@ -1434,6 +1450,13 @@ export function createZenTaoClient(config) {
     stopOnError = true,
   } = {}) {
     const safeMaxItems = Math.max(1, Math.min(Number(maxItems) || 20, MAX_BATCH_RESOLVE_ITEMS));
+    const validatedModules = normalizeSolutionModules(solutionModules);
+    if (!validatedModules) {
+      throw new Error(
+        "batchResolveMyBugs REQUIRES non-empty solutionModules {rootCause, fixApproach, logicChange, impact} to write 【根因】【修复思路】【改动逻辑】【影响范围】 template text on each bug. " +
+        "Passing plain comment or solution without solutionModules is no longer accepted — bugs will NOT be resolved."
+      );
+    }
     const listResult = await getMyBugs({
       status,
       keyword,
@@ -1476,6 +1499,13 @@ export function createZenTaoClient(config) {
       }
     }
 
+    const batchSuggestion =
+      solutionModules == null && !solution
+        ? {
+            tip: "Pass shared solutionModules {rootCause, fixApproach, logicChange, impact} for structured 【根因】【修复思路】【改动逻辑】【影响范围】 template text on each resolved bug.",
+          }
+        : {};
+
     return {
       requested: listResult.matched,
       attempted: candidates.length,
@@ -1483,6 +1513,7 @@ export function createZenTaoClient(config) {
       failed: failed.length,
       success,
       errors: failed,
+      ...batchSuggestion,
     };
   }
 
