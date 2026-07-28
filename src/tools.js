@@ -16,23 +16,27 @@ const SAFE_BUG_LIST_PATHS = new Set(["/bugs", "/my/bug", "/my/bugs"]);
 const SOLUTION_MODULES_SCHEMA = {
   type: "object",
   description:
-    "Preferred structured solution. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. Prefer this over plain solution. Avoid Evidence/Verify labels, file paths, and compile/test commands.",
+    "Preferred structured solution. Server formats into multi-line text with 【根因】【修复思路】【改动逻辑】【影响范围】. Prefer this over plain solution. RULES: 1) Each field 1-3 sentences, business-readable. 2) NO file paths, compile/test commands, commit hashes, screenshot paths. 3) NO empty statements like '已修复并自测' or '功能完整'. 4) NO Evidence:/Verify: label prefixes.",
   properties: {
     rootCause: {
       type: "string",
-      description: "【根因】Why it broke: trigger condition + wrong behavior.",
+      description:
+        "【根因】Why it broke: trigger condition + wrong behavior. 1-3 sentences, business-readable. GOOD: '分页参数为空时仍进入查询构造，导致列表请求异常' BAD: '按钮未绑定事件' (symptom, not root cause) or '修改 xxx/index.vue 文件' (implementation noise).",
     },
     fixApproach: {
       type: "string",
-      description: "【修复思路】How to fix: strategy without low-level proof noise.",
+      description:
+        "【修复思路】How to fix: strategy without low-level proof noise. GOOD: '为空参数补默认值，在构造前做兜底校验' BAD: '直接改了代码' or '已修复并自测' (zero information).",
     },
     logicChange: {
       type: "string",
-      description: "【改动逻辑】Key branch/validation/flow changes (before → after or bullet points).",
+      description:
+        "【改动逻辑】Key branch/validation/flow changes — describe what CHANGED logically, not which file. GOOD: 'page/size 为空时回落默认值；非法值改为明确错误提示，避免前端重复提交' BAD: '修改 frontend/xxx/index.vue' (file path is prohibited) or '改完了' (too vague).",
     },
     impact: {
       type: "string",
-      description: "【影响范围】Affected pages/APIs/scenarios and result-oriented regression notes.",
+      description:
+        "【影响范围】Affected pages/APIs/scenarios and result-oriented regression notes. GOOD: '列表查询与分页切换；重点回归空参数进入与异常提示是否收敛' BAD: '功能完整，可正常使用' (meaningless filler) or '测试已通过' (not impact).",
     },
   },
   additionalProperties: false,
