@@ -64,6 +64,7 @@ const KNOWN_TOOL_NAMES = new Set([
   "verify_bug",
   "comment_bug",
   "upload_attachment",
+  "download_attachment",
 ]);
 
 function normalizeToolName(rawName) {
@@ -257,6 +258,14 @@ async function main() {
           bugId: args.bugId,
           filePath: args.filePath,
           fileName: args.fileName,
+        });
+        return toMcpTextResult(JSON.stringify(resp, null, 2));
+      }
+
+      if (toolName === "download_attachment") {
+        const resp = await zentao.downloadFile({
+          fileId: args.fileId,
+          savePath: args.savePath,
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));
       }

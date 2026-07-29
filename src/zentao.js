@@ -1597,6 +1597,31 @@ export function createZenTaoClient(config) {
     };
   }
 
+  async function downloadFile({ fileId, savePath } = {}) {
+    if (!Number.isFinite(fileId) || fileId < 1) {
+      throw new Error("downloadFile requires a valid fileId");
+    }
+    await getToken();
+    const fs = await import("node:fs");
+    const tokenInfo = await getToken();
+    const { signal, cleanup } = createAbortSignal(timeoutMs);
+    try {
+      const url = buildUrl({ baseUrl: normalizedBaseUrl, apiPrefix: normalizedApiPrefix, path: `/files/${fileId}` });
+      const resp = await fetch(url, {
+        headers: { Token: tokenInfo.token },
+        signal,
+      });
+      if (!resp.ok) {
+        throw new Error(`Download failed: HTTP ${resp.status}`);
+      }
+      const buffer = await resp.arrayBuffer();
+      fs.writeFileSync(savePath, Buffer.from(buffer));
+      return { fileId, savedTo: savePath, size: buffer.byteLength, contentType: resp.headers.get("content-type") || "" };
+    } finally {
+      cleanup();
+    }
+  }
+
   return {
     getToken,
     call,
@@ -1610,5 +1635,6 @@ export function createZenTaoClient(config) {
     commentBug,
     batchResolveMyBugs,
     uploadFile,
+    downloadFile,
   };
 }

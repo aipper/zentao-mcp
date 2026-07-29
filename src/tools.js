@@ -255,6 +255,19 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "download_attachment",
+    description: "Download a file/attachment from ZenTao by fileID and save to local disk. Uses API Token auth. Returns saved path and file size.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileId: { type: "number", minimum: 1, description: "File ID from bug detail attachments/files list" },
+        savePath: { type: "string", description: "Absolute path to save the downloaded file" },
+      },
+      required: ["fileId", "savePath"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export function assertToolArgs(name, args) {
