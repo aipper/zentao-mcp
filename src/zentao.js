@@ -693,6 +693,8 @@ export function createZenTaoClient(config) {
       ["resolvedDate", ["resolvedDate", "resolveddate", "resolved_date"]],
       ["closedBy", ["closedBy", "closedby", "closed_by"], { transform: normalizeUserIdentity }],
       ["closedDate", ["closedDate", "closeddate", "closed_date"]],
+      ["activatedCount", ["activatedCount", "activatedcount", "activated_count"]],
+      ["activatedDate", ["activatedDate", "activateddate", "activated_date"]],
       ["product", ["product"]],
       ["project", ["project"]],
       ["projectSet", ["projectSet", "projectset", "project_set", "projectSetId", "projectsetid", "project_set_id"]],
@@ -721,6 +723,77 @@ export function createZenTaoClient(config) {
     if (openedFiles.length > 0) safeBug.openedFiles = openedFiles;
 
     return safeBug;
+  }
+
+  function stripHtmlToText(value) {
+    const text = String(value || "");
+    if (!text) return "";
+    return text
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>\s*<p\b[^>]*>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\u00a0/g, " ")
+      .split("\n")
+      .map((line) => line.replace(/[ \t]+/g, " ").trim())
+      .filter((line, i, arr) => line || (i !== 0 && i !== arr.length - 1))
+      .join("\n")
+      .trim();
+  }
+
+  function buildActivationSummary(bug) {
+    if (!bug || typeof bug !== "object") return null;
+    const actions = Array.isArray(bug.actions) ? bug.actions : [];
+    const activated = actions
+      .filter((a) => a && String(a.action || "").toLowerCase() === "activated")
+      .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    const countRaw = Number(bug.activatedCount);
+    const count = Number.isFinite(countRaw) && countRaw > 0 ? countRaw : activated.length;
+    if (count <= 0) return null;
+    const last = activated[activated.length - 1] || null;
+    const summary = { count };
+    if (last) {
+      if (last.actor) summary.lastActor = String(last.actor);
+      if (last.date) summary.lastDate = String(last.date);
+      const comment = stripHtmlToText(last.comment);
+      if (comment) summary.lastComment = comment;
+    } else if (bug.activatedDate) {
+      summary.lastDate = bug.activatedDate;
+    }
+    return summary;
+  }
+
+  function buildSafeActions(rawActions) {
+    if (!Array.isArray(rawActions)) return [];
+    return rawActions
+      .filter((a) => a && typeof a === "object")
+      .map((a) => {
+        const item = {};
+        if (a.id !== undefined) item.id = a.id;
+        if (a.actor) item.actor = String(a.actor);
+        if (a.action) item.action = String(a.action);
+        if (a.date) item.date = String(a.date);
+        const comment = stripHtmlToText(a.comment);
+        if (comment) item.comment = comment;
+        if (Array.isArray(a.history) && a.history.length > 0) {
+          item.history = a.history
+            .filter((h) => h && typeof h === "object")
+            .map((h) => {
+              const entry = {};
+              if (h.field) entry.field = String(h.field);
+              if (h.old !== undefined && h.old !== null && h.old !== "") entry.old = String(h.old);
+              if (h.new !== undefined && h.new !== null && h.new !== "") entry.new = String(h.new);
+              return entry;
+            })
+            .filter((entry) => entry.field);
+        }
+        return item;
+      });
   }
 
   function isImageLikeText(value) {
@@ -1245,7 +1318,39 @@ export function createZenTaoClient(config) {
       id: bugId,
       found: true,
       bug: buildSafeBugDetail(bug),
+      activation: buildActivationSummary(bug),
       images: extractImageUrlsFromBug(bug),
+      raw: { status: resp.status },
+    };
+  }
+
+  async function getBugActions({ id } = {}) {
+    const bugId = Number(id);
+    if (!Number.isFinite(bugId) || bugId < 1) {
+      throw new Error("getBugActions requires a valid bug id");
+    }
+
+    const detailPath = buildBugDetailPath({ id: bugId });
+    const resp = await call({ path: detailPath, method: "GET" });
+    const bug = parseBugDetailFromResponse(resp.data);
+    if (!bug) {
+      return {
+        id: bugId,
+        found: false,
+        actions: [],
+        activation: null,
+        count: 0,
+        raw: { status: resp.status },
+      };
+    }
+
+    const actions = buildSafeActions(bug.actions);
+    return {
+      id: bugId,
+      found: true,
+      actions,
+      activation: buildActivationSummary(bug),
+      count: actions.length,
       raw: { status: resp.status },
     };
   }
@@ -1629,6 +1734,7 @@ export function createZenTaoClient(config) {
     listMyProjects,
     getMyBugs,
     getBugDetail,
+    getBugActions,
     resolveBug,
     closeBug,
     verifyBug,

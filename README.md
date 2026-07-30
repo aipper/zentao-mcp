@@ -115,7 +115,8 @@ npm run smoke
 - `get_token`：获取/刷新 token（始终只回显脱敏后的 token 摘要）
 - `list_my_projects`：示例：列出“我参与的项目”（字段匹配基于常见返回结构，可能需按你的实例微调；不适合作为项目集 bug 的唯一发现入口）
 - `get_my_bugs`：获取“指派给我”的 bug（支持 `status`/`keyword`/`limit`/`page`/`productId`/`projectSetId`，默认路径 `/bugs`；`path` 仅允许 `/bugs`、`/my/bug`、`/my/bugs`）
-- `get_bug_detail`：按 `id` 获取 bug 详情（固定读取 `/bugs/{id}`；返回安全裁剪后的 bug 摘要与同源图片链接，不直接透传外部图片地址或原始附件外链）
+- `get_bug_detail`：按 `id` 获取 bug 详情（固定读取 `/bugs/{id}`；返回安全裁剪后的 bug 摘要与同源图片链接，不直接透传外部图片地址或原始附件外链）。当 bug 被激活过时，额外返回 `activation` 摘要 `{count, lastActor, lastDate, lastComment}`，其中 `lastComment` 是最近一次激活时测试人员填写的评论（已去除 HTML）。bug 摘要现包含 `activatedCount`/`activatedDate`。
+- `get_bug_actions`：按 `id` 获取 bug 的动作历史（激活/解决/关闭/评论等）。同一 `/bugs/{id}` 端点，返回 `actions:[{id, actor, action, date, comment, history:[{field, old, new}]}]`（`comment` 已去 HTML）和 `activation` 摘要。当 bug 被激活、需要拿到激活评论/字段变更明细时使用；`get_bug_detail` 的 `activation.lastComment` 已覆盖"只看最近一次激活评论"的常见场景，需完整历史再用本工具。
 - `resolve_bug`：按 `id` 调用真正的解决接口 `POST /bugs/{id}/resolve`（默认 `resolution=fixed`；`resolvedBuild` 默认取 `ZENTAO_DEFAULT_RESOLVED_BUILD`/`trunk`；优先 `solutionModules`，兼容纯文本 `solution`）
 - `batch_resolve_my_bugs`：批量解决“我的 bug”（同上 resolve API；默认筛选 `status=active`，支持 `productId`/`projectSetId`/`resolvedBuild`，默认遇错即停，`maxItems` 上限 100；优先共享 `solutionModules`）
 - `close_bug`：按 `id` 关闭 bug

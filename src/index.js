@@ -58,6 +58,7 @@ const KNOWN_TOOL_NAMES = new Set([
   "list_my_projects",
   "get_my_bugs",
   "get_bug_detail",
+  "get_bug_actions",
   "resolve_bug",
   "batch_resolve_my_bugs",
   "close_bug",
@@ -189,6 +190,13 @@ async function main() {
 
       if (toolName === "get_bug_detail") {
         const resp = await zentao.getBugDetail({
+          id: args.id,
+        });
+        return toMcpTextResult(JSON.stringify(resp, null, 2));
+      }
+
+      if (toolName === "get_bug_actions") {
+        const resp = await zentao.getBugActions({
           id: args.id,
         });
         return toMcpTextResult(JSON.stringify(resp, null, 2));

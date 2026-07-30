@@ -110,6 +110,19 @@ export const TOOLS = [
     },
   },
   {
+    name: "get_bug_actions",
+    description:
+      "Get bug action history by ID (activations/resolutions/comments with field-level changes). Same endpoint as get_bug_detail (/bugs/{id}) but returns the actions array instead of bug fields. Use when a bug was reactivated and you need the activation comment, or any action history. Returns {id, found, actions:[{id,actor,action,date,comment,history:[{field,old,new}]}], activation:{count,lastActor,lastDate,lastComment}|null, count}.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", minimum: 1, description: "Bug ID" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "resolve_bug",
     description:
       "Resolve one bug by ID via POST /bugs/{id}/resolve. REQUIREs non-empty solutionModules {rootCause, fixApproach, logicChange, impact} — without it the resolve call will REJECT with an error. Plain comment/solution is no longer accepted. Many instances require resolvedBuild (解决版本); pass it or set ZENTAO_DEFAULT_RESOLVED_BUILD (e.g. trunk). Do NOT use raw HTTP PUT/edit as a resolve substitute — it only flips status without writing solution text.",
@@ -305,6 +318,14 @@ export function assertToolArgs(name, args) {
     }
     if (args.path !== undefined) {
       throw new Error("get_bug_detail.path is no longer supported");
+    }
+  }
+  if (name === "get_bug_actions") {
+    if (!Number.isFinite(args.id) || Number(args.id) < 1) {
+      throw new Error("get_bug_actions.id must be a number >= 1");
+    }
+    if (args.path !== undefined) {
+      throw new Error("get_bug_actions.path is no longer supported");
     }
   }
   if (name === "resolve_bug") {
