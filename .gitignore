@@ -12,3 +12,5 @@ coverage/
 *.swp
 *.swo
 *~
+.opencode/
+!.opencode/opencode.json
